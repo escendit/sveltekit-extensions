@@ -43,4 +43,4 @@ jobs:
           } | tee -a .npmrc
       # Publish
       - name: Publish
-        run: bunx lerna publish
+        run: bunx lerna publish from-package --yes
