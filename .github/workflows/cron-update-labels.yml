@@ -1,0 +1,26 @@
+# Utility that updates labels based on keystone repository with reusable workflows
+name: "Monthly Label Timer"
+on:
+  # Manually run the job
+  workflow_dispatch:
+  # Periodically run the job
+  # Every first day of the month at 1:32 UTC
+  schedule:
+    - cron: "32 1 1 * *"
+
+# Prevent Concurrent Jobs
+concurrency:
+  group: labels-monthly-${{ github.ref }}
+  cancel-in-progress: true
+
+# Grant only what’s needed; label management requires issues: write
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  # Runs reusable workflow (utility-update-labels.yml on the main branch) from keystone repository
+  create-labels:
+    name: "Update Labels"
+    uses: escendit/keystone/.github/workflows/utility-update-labels.yml@main
+    secrets: inherit
