@@ -11,6 +11,13 @@ export class InMemorySessionStore implements ISessionStore {
 		this.datastore = {};
 		this.expirations = {};
 	}
+
+    delete(sessionKey: string): Promise<void> {
+        delete this.datastore[sessionKey];
+        delete this.expirations[sessionKey];
+        return Promise.resolve();
+    }
+
 	exists(sessionKey: string): Promise<boolean> {
 		// Validate input!
 		if (sessionKey === undefined || sessionKey === null) {
