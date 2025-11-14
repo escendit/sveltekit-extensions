@@ -49,17 +49,17 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
             // static content we should skip, but this is only an opinion...
             return handleSkip(request);
         case `${config.signin?.page}`:
-            return handleSigninPage(request);
+            return handleSignInPage(request);
         case `${config.signin?.endpoint}`:
-            return handleSigninEndpoint(request);
+            return handleSignInEndpoint(request);
         case `${config.signin?.callback}`:
-            return handleSigninCallback(request);
+            return handleSignInCallback(request);
         case `${config.signout?.page}`:
-            return handleSignoutPage(request);
+            return handleSignOutPage(request);
         case `${config.signout?.endpoint}`:
-            return handleSignoutEndpoint(request);
+            return handleSignOutEndpoint(request);
         case `${config.signout?.callback}`:
-            return handleSignoutCallback(request);
+            return handleSignOutCallback(request);
     }
 
     // Automatic Sign-in
@@ -81,16 +81,16 @@ const handleSkip: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSigninPage: Handle = async ({event, resolve}) => {
+const handleSignInPage: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSigninEndpoint: Handle = async ({event, resolve}) => {
+const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // signin process starts here
     // fetch session id
     const {config, store, hasher, generator, sessionId} = event.locals;
-    const relativeSigninCallback = config.signin?.callback;
+    const relativeSignInCallback = config.signin?.callback;
     const issuer = config.issuer;
     const clientId = config.clientId;
     const clientSecret = config.clientSecret;
@@ -115,7 +115,7 @@ const handleSigninEndpoint: Handle = async ({event, resolve}) => {
     const codeVerifier = arctic.generateCodeVerifier();
     const challengeId = hasher.hash(generator.generate(config.size));
     const scopes = ['openid', 'profile'];
-    const redirectUri = `${event.url.origin}${relativeSigninCallback}?challenge=${challengeId}`;
+    const redirectUri = `${event.url.origin}${relativeSignInCallback}?challenge=${challengeId}`;
 
     const challenge = {
         state,
@@ -126,7 +126,7 @@ const handleSigninEndpoint: Handle = async ({event, resolve}) => {
     }
 
     // store the challenge
-    await store.setSingle(`challenge:signin:${challengeId}`, JSON.stringify(challenge));
+    await store.setSingle(`challenge:signIn:${challengeId}`, JSON.stringify(challenge));
 
     // build authorization url
     const identityProvider = new KeyCloak(issuer, clientId, clientSecret, redirectUri);
@@ -141,7 +141,7 @@ const handleSigninEndpoint: Handle = async ({event, resolve}) => {
     });
 }
 
-const handleSigninCallback: Handle = async ({event}) => {
+const handleSignInCallback: Handle = async ({event}) => {
     let validationErrors: string[] = [];
 
     const {config, store, sessionId} = event.locals;
@@ -157,7 +157,7 @@ const handleSigninCallback: Handle = async ({event}) => {
     } = Object.fromEntries(event.url.searchParams.entries());
 
 
-    const challengeJson = await store.getSingle(`challenge:signin:${challengeId}`);
+    const challengeJson = await store.getSingle(`challenge:signIn:${challengeId}`);
 
     if (challengeJson === null) {
         return json({
@@ -207,7 +207,7 @@ const handleSigninCallback: Handle = async ({event}) => {
         const identityJson = JSON.stringify(sessionData);
 
         // delete challenge data, after a successful challenge
-        await store.delete(`challenge:signin:${challengeId}`);
+        await store.delete(`challenge:signIn:${challengeId}`);
 
         // mark the user for a session.
         await store.setMultiple(`session:${sessionId}`, [
@@ -229,7 +229,7 @@ const handleSigninCallback: Handle = async ({event}) => {
         if (e instanceof arctic.ArcticFetchError) {
         }
 
-        await store.delete(`challenge:signin:${challengeId}`);
+        await store.delete(`challenge:signIn:${challengeId}`);
         await store.setMultiple(`session:${sessionId}`, [
             "identity",
             null,
@@ -241,15 +241,15 @@ const handleSigninCallback: Handle = async ({event}) => {
     });
 }
 
-const handleSignoutPage: Handle = async ({event, resolve}) => {
+const handleSignOutPage: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSignoutEndpoint: Handle = async ({event, resolve}) => {
+const handleSignOutEndpoint: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSignoutCallback: Handle = async ({event, resolve}) => {
+const handleSignOutCallback: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
