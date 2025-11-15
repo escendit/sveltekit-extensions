@@ -178,6 +178,18 @@ const handleSignInCallback: Handle = async ({event}) => {
         validationErrors.push("Issuer mismatched");
     }
 
+    if (validationErrors.length > 0) {
+        await store.delete(`challenge:signIn:${challengeId}`);
+        return json(
+            {
+                error: "invalid_callback",
+            },
+            {
+                status: 400,
+            },
+        );
+    }
+
     const identityProvider = new KeyCloak(issuer, clientId, clientSecret, challenge.redirectUri);
 
     try {
