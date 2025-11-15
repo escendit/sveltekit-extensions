@@ -9,6 +9,11 @@ export class RedisSessionStore implements ISessionStore {
     public constructor() {
         this.client = redis;
     }
+
+    async delete(sessionKey: string): Promise<void> {
+        await this.client.del(sessionKey);
+        return Promise.resolve();
+    }
 	exists(sessionKey: string): Promise<boolean> {
         return this.client.exists(sessionKey);
 	}

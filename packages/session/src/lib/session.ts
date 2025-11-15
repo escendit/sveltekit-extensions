@@ -11,7 +11,7 @@ import { sequence } from '@sveltejs/kit/hooks';
  * @param sessionConfig
  * @constructor
  */
-const SessionMiddleware = (sessionConfig?: SessionConfig) => {
+const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
 	const configuredSessionConfig: InternalSessionConfig = {
 		...Defaults,
 		...sessionConfig

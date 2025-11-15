@@ -2,8 +2,8 @@
   "name": "@escendit/sveltekit-auth-keycloak",
   "version": "0.0.0",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build && npm run prepack",
+    "dev": "bunx --bun vite dev",
+    "build": "bunx --bun vite build && npm run prepack",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo ''",
     "prepack": "svelte-kit sync && svelte-package && publint",
@@ -42,6 +42,7 @@
     "@sveltejs/kit": "^2.47.1",
     "@sveltejs/package": "^2.5.4",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@types/bun": "^1.3.2",
     "@vitest/browser-playwright": "^4.0.5",
     "playwright": "^1.56.1",
     "prettier": "^3.6.2",
@@ -60,5 +61,9 @@
     "session",
     "authentication",
     "keycloak"
-  ]
+  ],
+  "dependencies": {
+    "arctic": "^3.7.0",
+    "jose": "^6.1.1"
+  }
 }

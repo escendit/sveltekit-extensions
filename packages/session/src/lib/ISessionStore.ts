@@ -47,4 +47,11 @@ export interface ISessionStore {
 	 * @returns {Promise<string>}
 	 */
     setMultiple(sessionKey: string, values: Array<string>): Promise<string>;
+
+    /**
+     * Delete a session.
+     * @param sessionKey
+     * @returns {Promise<void>}
+     */
+    delete(sessionKey: string): Promise<void>;
 }
