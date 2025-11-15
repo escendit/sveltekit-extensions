@@ -34,7 +34,7 @@ jobs:
       - name: Set VERSION variable
         run: echo "VERSION=${TAG#v}" >> $GITHUB_ENV
       - name: Set Version
-        run: bunx lerna version $VERSION --no-private --no-git-tag-version
+        run: bunx lerna version $VERSION --no-private --no-git-tag-version --yes
       # Set Authentication
       - name: Create .npmrc
         run: |
