@@ -1,6 +1,11 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 import type {InternalOidcConfig} from "$lib/types.ts";
+import type {
+    ISessionStore,
+    ISessionHasher,
+    ISessionGenerator,
+} from "@escendit/sveltekit-session";
 
 declare global {
 	namespace App {
