@@ -244,7 +244,7 @@ const handleSignInCallback: Handle = async ({event}) => {
         await store.delete(`challenge:signIn:${challengeId}`);
         await store.setMultiple(`session:${sessionId}`, [
             "identity",
-            null,
+            JSON.stringify(null),
         ]);
     }
 
