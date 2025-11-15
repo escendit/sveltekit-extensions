@@ -49,5 +49,7 @@ jobs:
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}"
           } | tee -a .npmrc
       # Publish
+      - name: Temp Commit
+        run: git commit -am "Temp Commit $VERSION"
       - name: Publish
         run: bunx lerna publish from-package --yes
