@@ -42,6 +42,10 @@ jobs:
             echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
           } | tee -a .npmrc
       # Publish
+      - name: Setup Git
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
       - name: Temp Commit
         run: git commit -am "Temp Commit $VERSION"
       - name: Publish
