@@ -2,6 +2,7 @@
   "name": "@escendit/sveltekit-auth-keycloak",
   "version": "0.0.0",
   "license": "Apache-2.0",
+  "repository": "https://github.com/escendit/sveltekit-extensions",
   "scripts": {
     "dev": "bunx --bun vite dev",
     "build": "bunx --bun vite build && npm run prepack",

@@ -2,6 +2,7 @@
   "name": "@escendit/sveltekit-session",
   "version": "0.0.0",
   "license": "Apache-2.0",
+  "repository": "https://github.com/escendit/sveltekit-extensions",
   "scripts": {
     "dev": "bunx --bun vite dev",
     "build": "bunx --bun vite build && npm run prepack",
@@ -53,7 +54,8 @@
     "vitest-browser-svelte": "^1.1.0"
   },
   "keywords": [
-    "svelte"
+    "svelte",
+    "session"
   ],
   "dependencies": {
     "@sveltejs/kit": "^2.47.3",
