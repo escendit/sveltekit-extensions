@@ -52,7 +52,7 @@ Provide a sign-in link somewhere in your app (defaults shown below):
 
 ```svelte
 <!-- +page.svelte or a layout -->
-<a href="/.oidc/signin?redirect_uri=\/">Sign in with Keycloak</a>
+<a href="/.oidc/signin?redirect_uri=/">Sign in with Keycloak</a>
 ```
 
 After a successful login, the session identity is stored and available via `event.locals.session.identity`.
