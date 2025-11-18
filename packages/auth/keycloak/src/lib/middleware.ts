@@ -97,7 +97,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // get current session data if they exist
     const [identityJson, _] = await store.getMultiple(`session:${sessionId}`, ["identity", "created"]);
-    const identity = JSON.parse(identityJson!);
+    const identity = identityJson ? JSON.parse(identityJson) : null;
 
     if (identity !== null) {
         return resolve(event);
