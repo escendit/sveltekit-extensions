@@ -1,8 +1,8 @@
-import type {InternalMiddlewareHandle, InternalOidcConfig, OidcConfig} from "$lib/types.ts";
+import type {InternalMiddlewareHandle, InternalOidcConfig, OidcConfig} from "$lib/types";
 import {type Handle, json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
-import {Defaults} from "$lib/config.ts";
+import {Defaults} from "$lib/config";
 import {KeyCloak} from "arctic";
 import * as arctic from "arctic";
 import * as jose from "jose";
@@ -97,7 +97,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // get current session data if they exist
     const [identityJson, _] = await store.getMultiple(`session:${sessionId}`, ["identity", "created"]);
-    const identity = JSON.parse(identityJson);
+    const identity = JSON.parse(identityJson!);
 
     if (identity !== null) {
         return resolve(event);

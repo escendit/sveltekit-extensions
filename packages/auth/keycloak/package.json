@@ -51,6 +51,7 @@
     "prettier-plugin-svelte": "^3.4.0",
     "publint": "^0.3.14",
     "svelte": "^5.41.0",
+    "svelte-adapter-bun": "^1.0.1",
     "svelte-check": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.1.10",
