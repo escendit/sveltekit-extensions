@@ -1,4 +1,4 @@
-import type {InternalOidcConfig, InternalMiddlewareHandle} from "$lib/types.ts";
+import type {InternalOidcConfig, InternalMiddlewareHandle} from "$lib/types.js";
 import {InMemorySessionStore, DefaultSessionHasher, DefaultSessionGenerator} from "@escendit/sveltekit-session";
 
 const Defaults: InternalOidcConfig = {
