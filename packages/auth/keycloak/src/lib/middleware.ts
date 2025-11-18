@@ -1,8 +1,8 @@
-import type {InternalMiddlewareHandle, InternalOidcConfig, OidcConfig} from "$lib/types";
+import type {InternalMiddlewareHandle, InternalOidcConfig, OidcConfig} from "$lib/types.js";
 import {type Handle, json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
-import {Defaults} from "$lib/config";
+import {Defaults} from "$lib/config.js";
 import {KeyCloak} from "arctic";
 import * as arctic from "arctic";
 import * as jose from "jose";
