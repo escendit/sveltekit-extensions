@@ -2,7 +2,10 @@ import type {InternalOidcConfig, InternalMiddlewareHandle} from "$lib/types.js";
 import {InMemorySessionStore, DefaultSessionHasher, DefaultSessionGenerator} from "@escendit/sveltekit-session";
 
 const Defaults: InternalOidcConfig = {
-    cookie: "session.id",
+    cookie: {
+        name: "session.id",
+        secure: true,
+    },
     expireIn: 86400,
     size: 128,
     sessionStore: new InMemorySessionStore(),

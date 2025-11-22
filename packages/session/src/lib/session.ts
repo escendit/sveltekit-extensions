@@ -12,10 +12,39 @@ import { sequence } from '@sveltejs/kit/hooks';
  * @constructor
  */
 const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
-	const configuredSessionConfig: InternalSessionConfig = {
+	let configuredSessionConfig: InternalSessionConfig = {
 		...Defaults,
-		...sessionConfig
 	};
+
+    if (sessionConfig?.cookie !== undefined) {
+        if (sessionConfig?.cookie?.name) {
+            configuredSessionConfig.cookie.name = sessionConfig.cookie.name;
+        }
+
+        if (sessionConfig?.cookie?.secure !== undefined) {
+            configuredSessionConfig.cookie.secure = sessionConfig.cookie.secure;
+        }
+    }
+
+    if (sessionConfig?.size !== undefined) {
+        configuredSessionConfig.size = sessionConfig.size;
+    }
+
+    if (sessionConfig?.expireIn !== undefined) {
+        configuredSessionConfig.expireIn = sessionConfig.expireIn;
+    }
+
+    if (sessionConfig?.sessionStore) {
+        configuredSessionConfig.sessionStore = sessionConfig.sessionStore;
+    }
+
+    if (sessionConfig?.sessionHasher) {
+        configuredSessionConfig.sessionHasher = sessionConfig.sessionHasher;
+    }
+
+    if (sessionConfig?.sessionGenerator) {
+        configuredSessionConfig.sessionGenerator = sessionConfig.sessionGenerator;
+    }
 
 	const errors = ValidateSessionConfiguration(configuredSessionConfig);
 
@@ -61,7 +90,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 		return resolve(event);
 	}
 
-	const cookieName = options.cookie;
+	const cookieName = options.cookie.name;
 	const expiresIn = options.expireIn;
 
 	let cookieValue = event.cookies.get(cookieName);
@@ -108,6 +137,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 
 	const currentDate = new Date();
 	const expiredDate = new Date(currentDate.getTime() + options.expireIn * 1000);
+    const secure = options.cookie.secure;
 	event.setHeaders({
 		'Cache-Control': 'no-store'
 	});
@@ -115,7 +145,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 	event.cookies.set(cookieName, sessionId, {
 		expires: expiredDate,
 		path: '/',
-		secure: true,
+		secure: secure,
 		sameSite: 'strict',
 		httpOnly: true,
 		priority: 'high'
@@ -142,9 +172,18 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 const ValidateSessionConfiguration = (configuration: InternalSessionConfig): Array<string> => {
 	const errors: Array<string> = [];
 
-	if (!configuration.cookie) {
+	if (configuration.cookie === undefined) {
 		errors.push('Cookie is missing');
 	}
+    else {
+        if (configuration.cookie.name === undefined) {
+            errors.push('Cookie name is missing');
+        }
+
+        if (configuration.cookie.secure === undefined) {
+            errors.push('Cookie secure is missing');
+        }
+    }
 
 	if (!Number.isFinite(configuration.expireIn) || configuration.expireIn <= 0) {
 		errors.push('expireIn must be a positive finite number (seconds)');

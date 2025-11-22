@@ -7,7 +7,10 @@ import { DefaultSessionHasher } from '$lib/DefaultSessionHasher.js';
  * Default configuration
  */
 const Defaults: InternalSessionConfig = {
-	cookie: "session.id",
+    cookie: {
+        name: "session.id",
+        secure: true,
+    },
 	expireIn: 86400,
     size: 128,
     sessionStore: new InMemorySessionStore(),

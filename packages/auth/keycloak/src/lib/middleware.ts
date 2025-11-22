@@ -1,4 +1,4 @@
-import type {InternalMiddlewareHandle, InternalOidcConfig, OidcConfig} from "$lib/types.js";
+import type {InternalMiddlewareHandle, InternalOidcConfig, Middleware, OidcConfig} from "$lib/types.js";
 import {type Handle, json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
@@ -7,25 +7,100 @@ import {KeyCloak} from "arctic";
 import * as arctic from "arctic";
 import * as jose from "jose";
 
-const OidcMiddleware: any = (config?: OidcConfig): Handle => {
+const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
 
-    const configuredSessionConfig: InternalOidcConfig = {
+    let configuredConfig: InternalOidcConfig = {
         ...Defaults,
-        ...config,
     };
 
-    /*const errors = ValidateSessionConfiguration(configuredSessionConfig);
+    if (config?.cookie !== undefined) {
+        if (config.cookie.name !== undefined) {
+            configuredConfig.cookie.name = config.cookie.name;
+        }
+
+        if (config.cookie.secure !== undefined) {
+            configuredConfig.cookie.secure = config.cookie.secure;
+        }
+    }
+
+    if (config?.expireIn !== undefined) {
+        configuredConfig.expireIn = config.expireIn;
+    }
+
+    if (config?.size !== undefined) {
+        configuredConfig.size = config.size;
+    }
+
+    if (config?.sessionStore !== undefined) {
+        configuredConfig.sessionStore = config.sessionStore;
+    }
+
+    if (config?.sessionGenerator !== undefined) {
+        configuredConfig.sessionGenerator = config.sessionGenerator;
+    }
+
+    if (config?.sessionHasher !== undefined) {
+        configuredConfig.sessionHasher = config.sessionHasher;
+    }
+
+    if (config?.challenge !== undefined) {
+        if (config.challenge.signin !== undefined) {
+            configuredConfig.challenge.signin = config.challenge.signin;
+        }
+    }
+
+    if (config?.signin !== undefined) {
+        if (config.signin.endpoint !== undefined) {
+            configuredConfig.signin.endpoint = config.signin.endpoint;
+        }
+
+        if (config.signin.page !== undefined) {
+            configuredConfig.signin.page = config.signin.page;
+        }
+
+        if (config.signin.callback !== undefined) {
+            configuredConfig.signin.callback = config.signin.callback;
+        }
+    }
+
+    if (config?.signout !== undefined) {
+        if (config.signout.page !== undefined) {
+            configuredConfig.signout.page = config.signout.page;
+        }
+
+        if (config.signout.endpoint !== undefined) {
+            configuredConfig.signout.endpoint = config.signout.endpoint;
+        }
+
+        if (config.signout.callback !== undefined) {
+            configuredConfig.signout.callback = config.signout.callback;
+        }
+    }
+
+    if (config?.issuer !== undefined) {
+        configuredConfig.issuer = config.issuer;
+    }
+
+    if (config?.clientId !== undefined) {
+        configuredConfig.clientId = config.clientId;
+    }
+
+    if (config?.clientSecret !== undefined) {
+        configuredConfig.clientSecret = config.clientSecret;
+    }
+
+    const errors = ValidateOidcConfiguration(configuredConfig);
 
     if (errors.length > 0) {
         console.error(errors);
         throw new Error('Invalid oidc config');
-    }*/
+    }
 
     const handleOidcMiddleware: Handle = async (request) => {
-        return handleOidcMiddlewareInternal(request, configuredSessionConfig);
+        return handleOidcMiddlewareInternal(request, configuredConfig);
     };
 
-    return sequence(SessionMiddleware(configuredSessionConfig), handleOidcMiddleware);
+    return sequence(SessionMiddleware(configuredConfig), handleOidcMiddleware);
 }
 
 const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, config: InternalOidcConfig) => {
@@ -263,6 +338,95 @@ const handleSignOutEndpoint: Handle = async ({event, resolve}) => {
 
 const handleSignOutCallback: Handle = async ({event, resolve}) => {
     return resolve(event);
+}
+
+const ValidateOidcConfiguration = (configuration: InternalOidcConfig): Array<string> => {
+    const errors: Array<string> = [];
+
+    if (configuration.cookie === undefined) {
+        errors.push('Cookie is missing');
+    }
+    else {
+        if (configuration.cookie.name === undefined) {
+            errors.push('Cookie name is missing');
+        }
+
+        if (configuration.cookie.secure === undefined) {
+            errors.push('Cookie secure is missing');
+        }
+    }
+
+    if (!Number.isFinite(configuration.expireIn) || configuration.expireIn <= 0) {
+        errors.push('expireIn must be a positive finite number (seconds)');
+    }
+
+    if (!Number.isFinite(configuration.size) || configuration.size < 128) {
+        errors.push('Size is not a number or is less than 128');
+    }
+
+    if (!configuration.sessionGenerator) {
+        errors.push('Session generator is missing');
+    }
+
+    if (!configuration.sessionHasher) {
+        errors.push('Session hasher is missing');
+    }
+
+    if (!configuration.sessionStore) {
+        errors.push('Session store is missing');
+    }
+
+    if (configuration.challenge === undefined) {
+        errors.push('Challenge is missing');
+    } else {
+        if (configuration.challenge.signin === undefined) {
+            errors.push('Signin challenge is missing');
+        }
+    }
+
+    if (configuration.signin === undefined) {
+        errors.push('Signin configuration is missing');
+    }
+    else {
+        if (configuration.signin.endpoint === undefined) {
+            errors.push('Signin endpoint is missing');
+        }
+        if (configuration.signin.page === undefined) {
+            errors.push('Signin page is missing');
+        }
+        if (configuration.signin.callback === undefined) {
+            errors.push('Signin callback is missing');
+        }
+    }
+
+    if (configuration.signout === undefined) {
+        errors.push('Signout configuration is missing');
+    }
+    else {
+        if (configuration.signout.page === undefined) {
+            errors.push('Signout page is missing');
+        }
+        if (configuration.signout.endpoint === undefined) {
+            errors.push('Signout endpoint is missing');
+        }
+        if (configuration.signout.callback === undefined) {
+            errors.push('Signout callback is missing');
+        }
+    }
+
+    if (configuration.issuer === undefined) {
+        errors.push('Issuer is missing');
+    }
+
+    if (configuration.clientId === undefined) {
+        errors.push('Client id is missing');
+    }
+
+    if (configuration.clientSecret === undefined) {
+        errors.push('Client secret is missing');
+    }
+
+    return errors;
 }
 
 export {

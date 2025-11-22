@@ -2,35 +2,39 @@ import {type ISessionStore} from "@escendit/sveltekit-session";
 import {type ISessionHasher} from "@escendit/sveltekit-session";
 import {type ISessionGenerator} from "@escendit/sveltekit-session";
 import type {SessionConfig} from "@escendit/sveltekit-session";
-import type {RequestEvent, ResolveOptions} from "@sveltejs/kit";
+import type {Handle, RequestEvent, ResolveOptions} from "@sveltejs/kit";
 
+type Middleware = (config?: OidcConfig) => Handle;
 /**
  * Public Session configuration.
  */
 type OidcConfig = SessionConfig & {
-    challenge: {
-        signin: boolean;
+    challenge?: {
+        signin?: boolean;
     };
-    signin: {
-        page: string;
-        endpoint: string;
-        callback: string;
+    signin?: {
+        page?: string;
+        endpoint?: string;
+        callback?: string;
     };
-    signout: {
-        page: string;
-        endpoint: string;
-        callback: string;
+    signout?: {
+        page?: string;
+        endpoint?: string;
+        callback?: string;
     };
-    issuer: string;
-    clientId: string;
-    clientSecret: string;
+    issuer?: string;
+    clientId?: string;
+    clientSecret?: string;
 };
 
 /**
  * Internal Session configuration.
  */
 type InternalSessionConfig = {
-    cookie: string;
+    cookie: {
+        name: string;
+        secure: boolean;
+    },
     expireIn: number;
     size: number;
     sessionStore: ISessionStore;
@@ -72,6 +76,7 @@ type InternalMiddlewareHandle = (
 
 export type {
     OidcConfig,
+    Middleware,
     InternalMiddlewareHandle,
     InternalSessionConfig,
     InternalOidcConfig,
