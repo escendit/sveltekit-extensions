@@ -25,7 +25,7 @@ const OidcMiddleware: any = (config?: OidcConfig): Handle => {
         return handleOidcMiddlewareInternal(request, configuredSessionConfig);
     };
 
-    return sequence(SessionMiddleware(config), handleOidcMiddleware);
+    return sequence(SessionMiddleware(configuredSessionConfig), handleOidcMiddleware);
 }
 
 const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, config: InternalOidcConfig) => {
