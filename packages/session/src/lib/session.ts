@@ -151,7 +151,6 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 		secure: secure,
 		sameSite: 'strict',
 		httpOnly: true,
-		priority: 'high'
 	});
 
 	// we have to redirect to write a cookie
