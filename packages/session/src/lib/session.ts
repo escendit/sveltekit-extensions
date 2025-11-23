@@ -8,45 +8,48 @@ import { sequence } from '@sveltejs/kit/hooks';
 
 /**
  * Session middleware.
- * @param sessionConfig
+ * @param config
  * @constructor
  */
-const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
-	let configuredSessionConfig: InternalSessionConfig = {
+const SessionMiddleware = (config?: SessionConfig): Handle => {
+	let configuredConfig: InternalSessionConfig = {
 		...Defaults,
+        cookie: {
+            ...Defaults.cookie,
+        },
 	};
 
-    if (sessionConfig?.cookie !== undefined) {
-        if (sessionConfig?.cookie?.name) {
-            configuredSessionConfig.cookie.name = sessionConfig.cookie.name;
+    if (config?.cookie !== undefined) {
+        if (config?.cookie?.name) {
+            configuredConfig.cookie.name = config.cookie.name;
         }
 
-        if (sessionConfig?.cookie?.secure !== undefined) {
-            configuredSessionConfig.cookie.secure = sessionConfig.cookie.secure;
+        if (config?.cookie?.secure !== undefined) {
+            configuredConfig.cookie.secure = config.cookie.secure;
         }
     }
 
-    if (sessionConfig?.size !== undefined) {
-        configuredSessionConfig.size = sessionConfig.size;
+    if (config?.size !== undefined) {
+        configuredConfig.size = config.size;
     }
 
-    if (sessionConfig?.expireIn !== undefined) {
-        configuredSessionConfig.expireIn = sessionConfig.expireIn;
+    if (config?.expireIn !== undefined) {
+        configuredConfig.expireIn = config.expireIn;
     }
 
-    if (sessionConfig?.sessionStore) {
-        configuredSessionConfig.sessionStore = sessionConfig.sessionStore;
+    if (config?.sessionStore) {
+        configuredConfig.sessionStore = config.sessionStore;
     }
 
-    if (sessionConfig?.sessionHasher) {
-        configuredSessionConfig.sessionHasher = sessionConfig.sessionHasher;
+    if (config?.sessionHasher) {
+        configuredConfig.sessionHasher = config.sessionHasher;
     }
 
-    if (sessionConfig?.sessionGenerator) {
-        configuredSessionConfig.sessionGenerator = sessionConfig.sessionGenerator;
+    if (config?.sessionGenerator) {
+        configuredConfig.sessionGenerator = config.sessionGenerator;
     }
 
-	const errors = ValidateSessionConfiguration(configuredSessionConfig);
+	const errors = ValidateSessionConfiguration(configuredConfig);
 
 	if (errors.length > 0) {
 		console.error(errors);
@@ -54,11 +57,11 @@ const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
 	}
 
 	const handleSessionMiddleware: Handle = async (request) => {
-		return handleSessionMiddlewareInternal(request, configuredSessionConfig);
+		return handleSessionMiddlewareInternal(request, configuredConfig);
 	};
 
 	const prepareSessionMiddleware: Handle = async (request) => {
-		return handlePrepareSessionMiddleware(request, configuredSessionConfig);
+		return handlePrepareSessionMiddleware(request, configuredConfig);
 	}
 	return sequence(prepareSessionMiddleware, handleSessionMiddleware);
 };

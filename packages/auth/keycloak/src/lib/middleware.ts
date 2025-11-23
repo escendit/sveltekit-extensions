@@ -11,6 +11,18 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
 
     let configuredConfig: InternalOidcConfig = {
         ...Defaults,
+        cookie: {
+            ...Defaults.cookie,
+        },
+        challenge: {
+            ...Defaults.challenge,
+        },
+        signin: {
+            ...Defaults.signin,
+        },
+        signout: {
+            ...Defaults.signout,
+        },
     };
 
     if (config?.cookie !== undefined) {
