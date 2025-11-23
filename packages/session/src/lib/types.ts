@@ -7,7 +7,10 @@ import type { ISessionGenerator } from '$lib/ISessionGenerator.js';
  * Public Session configuration.
  */
 type SessionConfig = {
-	cookie?: string;
+	cookie?: {
+        name?: string;
+        secure?: boolean;
+    };
 	expireIn?: number;
 	size?: number;
 	sessionStore?: ISessionStore;
@@ -19,7 +22,10 @@ type SessionConfig = {
  * Internal Session configuration.
  */
 type InternalSessionConfig = {
-	cookie: string;
+    cookie: {
+        name: string;
+        secure: boolean;
+    };
 	expireIn: number;
 	size: number;
 	sessionStore: ISessionStore;

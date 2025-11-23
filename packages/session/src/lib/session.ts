@@ -8,16 +8,48 @@ import { sequence } from '@sveltejs/kit/hooks';
 
 /**
  * Session middleware.
- * @param sessionConfig
+ * @param config
  * @constructor
  */
-const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
-	const configuredSessionConfig: InternalSessionConfig = {
+const SessionMiddleware = (config?: SessionConfig): Handle => {
+	let configuredConfig: InternalSessionConfig = {
 		...Defaults,
-		...sessionConfig
+        cookie: {
+            ...Defaults.cookie,
+        },
 	};
 
-	const errors = ValidateSessionConfiguration(configuredSessionConfig);
+    if (config?.cookie !== undefined) {
+        if (config?.cookie?.name) {
+            configuredConfig.cookie.name = config.cookie.name;
+        }
+
+        if (config?.cookie?.secure !== undefined) {
+            configuredConfig.cookie.secure = config.cookie.secure;
+        }
+    }
+
+    if (config?.size !== undefined) {
+        configuredConfig.size = config.size;
+    }
+
+    if (config?.expireIn !== undefined) {
+        configuredConfig.expireIn = config.expireIn;
+    }
+
+    if (config?.sessionStore) {
+        configuredConfig.sessionStore = config.sessionStore;
+    }
+
+    if (config?.sessionHasher) {
+        configuredConfig.sessionHasher = config.sessionHasher;
+    }
+
+    if (config?.sessionGenerator) {
+        configuredConfig.sessionGenerator = config.sessionGenerator;
+    }
+
+	const errors = ValidateSessionConfiguration(configuredConfig);
 
 	if (errors.length > 0) {
 		console.error(errors);
@@ -25,11 +57,11 @@ const SessionMiddleware = (sessionConfig?: SessionConfig): Handle => {
 	}
 
 	const handleSessionMiddleware: Handle = async (request) => {
-		return handleSessionMiddlewareInternal(request, configuredSessionConfig);
+		return handleSessionMiddlewareInternal(request, configuredConfig);
 	};
 
 	const prepareSessionMiddleware: Handle = async (request) => {
-		return handlePrepareSessionMiddleware(request, configuredSessionConfig);
+		return handlePrepareSessionMiddleware(request, configuredConfig);
 	}
 	return sequence(prepareSessionMiddleware, handleSessionMiddleware);
 };
@@ -61,7 +93,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 		return resolve(event);
 	}
 
-	const cookieName = options.cookie;
+	const cookieName = options.cookie.name;
 	const expiresIn = options.expireIn;
 
 	let cookieValue = event.cookies.get(cookieName);
@@ -108,6 +140,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 
 	const currentDate = new Date();
 	const expiredDate = new Date(currentDate.getTime() + options.expireIn * 1000);
+    const secure = options.cookie.secure;
 	event.setHeaders({
 		'Cache-Control': 'no-store'
 	});
@@ -115,7 +148,7 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 	event.cookies.set(cookieName, sessionId, {
 		expires: expiredDate,
 		path: '/',
-		secure: true,
+		secure: secure,
 		sameSite: 'strict',
 		httpOnly: true,
 		priority: 'high'
@@ -142,9 +175,18 @@ const handleSessionMiddlewareInternal: InternalMiddlewareHandle = async (
 const ValidateSessionConfiguration = (configuration: InternalSessionConfig): Array<string> => {
 	const errors: Array<string> = [];
 
-	if (!configuration.cookie) {
+	if (configuration.cookie === undefined) {
 		errors.push('Cookie is missing');
 	}
+    else {
+        if (configuration.cookie.name === undefined) {
+            errors.push('Cookie name is missing');
+        }
+
+        if (configuration.cookie.secure === undefined) {
+            errors.push('Cookie secure is missing');
+        }
+    }
 
 	if (!Number.isFinite(configuration.expireIn) || configuration.expireIn <= 0) {
 		errors.push('expireIn must be a positive finite number (seconds)');
