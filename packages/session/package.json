@@ -50,7 +50,7 @@
     "publint": "^0.3.15",
     "svelte": "^5.41.4",
     "svelte-check": "^4.3.3",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vite": "^7.1.12",
     "vitest": "^4.0.8",
     "vitest-browser-svelte": "^2.0.2",
