@@ -14,6 +14,7 @@ Works with SvelteKit 2 and Svelte 5.
 - Session identity populated with tokens and claims after successful login
 - Transparent access-token refresh on expiry, RP-Initiated Logout on sign-out
 - Client-side OpenID Connect Session Management 1.0 (drop-in `<SessionMonitor />` component, or the lower-level `createSessionMonitor`) to react when the user's session changes at Keycloak outside this app
+- Server-side OpenID Connect Back-Channel Logout 1.0 so sessions get cleared even with no browser tab open to notice
 
 ## Installation
 
@@ -221,6 +222,18 @@ if (session.authenticated && session.sessionManagementSupported) {
 - `{ "authenticated": true, "sessionManagementSupported": true, "clientId": "...", "sessionState": "...", "checkSessionIframe": "..." }` otherwise - everything `createSessionMonitor` needs.
 
 `createSessionMonitor` takes those four values plus an `onChanged` callback, and optionally `onError` (called once, non-retryably, if Keycloak's iframe reports `"error"`) and `intervalMs` (default `3000`).
+
+## Reacting to a session change when no browser tab is open (OpenID Connect Back-Channel Logout 1.0)
+
+Session Management only works while a tab is open polling `check_session_iframe`. [Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html) closes the remaining gap: Keycloak POSTs a signed Logout Token directly to this app, server to server, whenever a session ends - no browser involved at all. Treat the two as complementary, not either/or: Session Management gives you fast, in-tab reactivity; Back-Channel Logout guarantees the session gets cleared server-side even if nobody's tab is open to notice.
+
+Setup: register `backchannelLogout.endpoint` (default `/.oidc/backchannel-logout`) as the client's **Backchannel Logout URL** in the Keycloak admin console. No app code beyond that - `OidcMiddleware` handles verification and session clearing automatically once the sign-in flow has run at least once (the `sid` index a Logout Token gets matched against is written at sign-in/refresh).
+
+What gets validated on an incoming Logout Token, beyond the general "is this a well-formed OIDC exchange" checks: signature (against the OP's `jwks_uri`), `iss`/`aud`, freshness (`iat` within the last 5 minutes), no `nonce` claim (a Logout Token that has one is suspect - that's an ID Token shape, not a Logout Token), the required `backchannel-logout` `events` claim, and at least one of `sub`/`sid`. A token that fails any of these gets a `400`; a validly-signed token that just doesn't match anything Keycloak clears the session for is still a `200` - the RP has nothing to act on, but the token wasn't invalid.
+
+Two things worth knowing about the current scope:
+- Session lookup only works when the Logout Token carries a `sid` claim (Keycloak always includes one when Backchannel Logout is enabled for the client). A `sub`-only token can't be mapped to a specific local session without risking clearing the wrong one for a user with multiple concurrent sessions, so it's accepted (`200`) but not acted on.
+- This clears the session in *this app's own store*. With a centrally shared store (`RedisSessionStore`), that's authoritative for every instance behind it. With `InMemorySessionStore` across multiple horizontally-scaled instances, only the instance that happened to receive Keycloak's POST is affected - the others keep the session until it naturally expires. It also does **not** push anything to an already-open browser tab by itself (no SSE/WebSocket channel is set up here) - that tab keeps working with its now-server-side-cleared session until its own access token expires or it hits a request that re-checks. Session Management (above) is what closes that particular gap while a tab is open.
 
 ## Troubleshooting
 

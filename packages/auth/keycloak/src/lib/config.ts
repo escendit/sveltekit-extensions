@@ -28,6 +28,9 @@ const Defaults: InternalOidcConfig = {
     session: {
         endpoint: "/.oidc/session",
     },
+    backchannelLogout: {
+        endpoint: "/.oidc/backchannel-logout",
+    },
     clientId: "invalid-client",
     clientSecret: "invalid-secret",
 };

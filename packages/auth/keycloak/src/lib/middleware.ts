@@ -50,6 +50,36 @@ const IsAccessTokenExpired = (identity: any): boolean => {
 }
 
 /**
+ * Maintains a `sid` (OIDC session id, from the decoded ID token) -> our own session id
+ * lookup, so a Back-Channel Logout Token (which only ever carries the OP's `sid`/`sub`,
+ * never our session cookie value) can be mapped back to the local session to clear. A
+ * no-op when the ID token has no `sid` claim - not every OP includes one, but Keycloak
+ * does whenever the client has Back-Channel Logout enabled, which is the only scenario
+ * this index exists for. Expires alongside the session it points at.
+ */
+const IndexBackchannelSid = async (
+    store: ISessionStore,
+    config: InternalOidcConfig,
+    sessionId: string,
+    idToken: any,
+): Promise<void> => {
+    if (typeof idToken?.sid !== "string") {
+        return;
+    }
+
+    const indexKey = `backchannel:sid:${idToken.sid}`;
+    await store.setSingle(indexKey, sessionId);
+    await store.expire(indexKey, config.expireIn);
+}
+
+/** Cleans up the index entry `IndexBackchannelSid` wrote, given the identity it was written for. */
+const DeleteBackchannelSidIndex = async (store: ISessionStore, identity: any): Promise<void> => {
+    if (typeof identity?.idToken?.sid === "string") {
+        await store.delete(`backchannel:sid:${identity.idToken.sid}`);
+    }
+}
+
+/**
  * Refresh an expired access token using the stored refresh token, replacing the session's
  * identity with the new tokens. Returns the new identity on success, or null when there's
  * no refresh token to use or the authorization server has genuinely rejected it (expired,
@@ -63,6 +93,7 @@ const RefreshIdentity = async (
 ): Promise<Record<string, any> | null> => {
     if (!identity.refreshTokenRaw) {
         await store.delete(`session:${sessionId}`);
+        await DeleteBackchannelSidIndex(store, identity);
         return null;
     }
 
@@ -97,6 +128,7 @@ const RefreshIdentity = async (
             "identity",
             JSON.stringify(sessionData),
         ]);
+        await IndexBackchannelSid(store, config, sessionId, idToken);
 
         return sessionData;
     } catch (e) {
@@ -117,6 +149,7 @@ const RefreshIdentity = async (
             // The authorization server genuinely rejected the refresh token (expired,
             // revoked, or already consumed) - the session can't be recovered.
             await store.delete(`session:${sessionId}`);
+            await DeleteBackchannelSidIndex(store, identity);
             return null;
         }
 
@@ -145,6 +178,9 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         },
         session: {
             ...Defaults.session,
+        },
+        backchannelLogout: {
+            ...Defaults.backchannelLogout,
         },
     };
 
@@ -218,6 +254,12 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         }
     }
 
+    if (config?.backchannelLogout !== undefined) {
+        if (config.backchannelLogout.endpoint !== undefined) {
+            configuredConfig.backchannelLogout.endpoint = config.backchannelLogout.endpoint;
+        }
+    }
+
     if (config?.issuer !== undefined) {
         configuredConfig.issuer = config.issuer;
     }
@@ -254,11 +296,42 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
     // sees the same rejection and surfaces it as a normal per-request error.
     configuredConfig.oidcConfiguration.catch(() => {});
 
+    // Derived from oidcConfiguration and cached the same way (once per middleware
+    // instance, not per-request) - RemoteJWKSet has its own internal fetch cache/cooldown
+    // that recreating it on every Back-Channel Logout POST would throw away.
+    configuredConfig.remoteJWKSet = configuredConfig.oidcConfiguration.then((configuration) => {
+        const jwksUri = configuration.serverMetadata().jwks_uri;
+
+        if (typeof jwksUri !== "string") {
+            throw new Error("OP discovery document has no jwks_uri - Back-Channel Logout token signatures cannot be verified");
+        }
+
+        return jose.createRemoteJWKSet(new URL(jwksUri));
+    });
+
+    // Same unhandled-rejection concern as oidcConfiguration above.
+    configuredConfig.remoteJWKSet.catch(() => {});
+
     const handleOidcMiddleware: Handle = async (request) => {
         return handleOidcMiddlewareInternal(request, configuredConfig);
     };
 
-    return sequence(SessionMiddleware(configuredConfig), handleOidcMiddleware);
+    const sessionAwareHandle = sequence(SessionMiddleware(configuredConfig), handleOidcMiddleware);
+
+    return async ({event, resolve}) => {
+        // The Back-Channel Logout endpoint receives a server-to-server POST straight from
+        // Keycloak with no session cookie at all. SessionMiddleware only lets non-GET
+        // requests through when an existing cookie already resolves to a session -
+        // otherwise it responds 405 before this middleware ever sees the request. Intercept
+        // this path ahead of SessionMiddleware entirely and use config.sessionStore
+        // directly, since SessionMiddleware never gets a chance to populate
+        // event.locals.store for it.
+        if (event.url.pathname === configuredConfig.backchannelLogout.endpoint) {
+            return handleBackchannelLogoutEndpoint(event, configuredConfig);
+        }
+
+        return sessionAwareHandle({event, resolve});
+    };
 }
 
 const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, config: InternalOidcConfig) => {
@@ -484,6 +557,7 @@ const handleSignInCallback: Handle = async ({event}) => {
             "identity",
             identityJson,
         ])
+        await IndexBackchannelSid(store, config, sessionId, idToken);
 
         // redirect back to a starting point
         return new Response(null, {
@@ -527,6 +601,7 @@ const handleSignOutEndpoint: Handle = async ({event}) => {
     // best-effort - even if it never completes (user closes the tab, IdP is down), the
     // local app session must already be gone.
     await store.delete(`session:${sessionId}`);
+    await DeleteBackchannelSidIndex(store, identity);
 
     const parsedRedirectUri = SanitizeRedirectUri(event, event.url.searchParams.get('redirect_uri'));
 
@@ -614,6 +689,110 @@ const handleSessionEndpoint: Handle = async ({event}) => {
         sessionState: identity.sessionState,
         checkSessionIframe,
     });
+}
+
+const BACKCHANNEL_LOGOUT_EVENT_CLAIM = "http://schemas.openid.net/event/backchannel-logout";
+
+/**
+ * Validates the claims a Logout Token is required to carry per the OpenID Connect
+ * Back-Channel Logout 1.0 spec, beyond what jose.jwtVerify already checks (signature,
+ * iss, aud, exp/iat freshness via maxTokenAge). Throws on the first violation found.
+ */
+const ValidateLogoutTokenClaims = (payload: jose.JWTPayload): void => {
+    if ("nonce" in payload) {
+        // A Logout Token MUST NOT contain a nonce claim - its presence would suggest this
+        // is actually (a forged, or confused-deputy) ID Token, not a genuine Logout Token.
+        throw new Error("Logout Token must not contain a nonce claim");
+    }
+
+    const events = payload.events;
+
+    if (typeof events !== "object" || events === null || !(BACKCHANNEL_LOGOUT_EVENT_CLAIM in events)) {
+        throw new Error("Logout Token missing the backchannel-logout events claim");
+    }
+
+    if (typeof payload.sub !== "string" && typeof payload.sid !== "string") {
+        throw new Error("Logout Token must contain a sub or sid claim");
+    }
+}
+
+/**
+ * Receives the OP's server-to-server POST when a session ends at Keycloak (user signed
+ * out elsewhere, admin action, session expiry) even if no browser tab is open to catch it
+ * via check_session_iframe polling - the defense-in-depth complement to
+ * OpenID Connect Session Management 1.0.
+ *
+ * Deliberately takes `event`/`config` as plain parameters rather than being a `Handle`
+ * reading `event.locals`: it's invoked ahead of SessionMiddleware entirely (see
+ * OidcMiddleware above), so `event.locals.store`/`config` are never populated for this
+ * request.
+ *
+ * Session lookup only works when the Logout Token carries a `sid` claim - matched against
+ * an index of sid -> our internal session id, written at sign-in/refresh time. A
+ * `sub`-only Logout Token (no `sid`) is still a validly-signed, spec-compliant token, but
+ * we have nothing to map it to: a naive sub-only index would only ever remember the most
+ * recently signed-in session for that user, and could end up clearing the wrong one for a
+ * user with multiple concurrent sessions - worse than doing nothing. That's still a 200
+ * (the token itself is valid; there's simply no local session to act on), not a 400.
+ *
+ * Also only ever clears the session on *this* instance's session store - for a shared
+ * store (RedisSessionStore) that's every instance behind it; for InMemorySessionStore
+ * behind multiple horizontally-scaled instances, only the instance that happened to
+ * receive this particular POST is affected (documented in the README).
+ */
+const handleBackchannelLogoutEndpoint = async (event: RequestEvent, config: InternalOidcConfig): Promise<Response> => {
+    const formData = await event.request.formData().catch(() => null);
+    const logoutToken = formData?.get("logout_token");
+
+    if (typeof logoutToken !== "string") {
+        return json({error: "invalid_request", error_description: "Missing logout_token"}, {status: 400});
+    }
+
+    let jwks;
+
+    try {
+        jwks = await config.remoteJWKSet;
+    } catch (e) {
+        // Discovery/JWKS is unreachable - an infrastructure problem, not a judgment about
+        // this specific token. A 400 here would tell Keycloak the Logout Token was invalid
+        // and it may stop retrying a genuinely valid logout event; 503 signals "try again
+        // later" instead, matching how OPs generally treat backchannel-logout failures.
+        return new Response(null, {status: 503});
+    }
+
+    try {
+        const {payload} = await jose.jwtVerify(logoutToken, jwks, {
+            issuer: config.issuer,
+            audience: config.clientId,
+            maxTokenAge: "5m",
+        });
+
+        ValidateLogoutTokenClaims(payload);
+
+        if (typeof payload.sid === "string") {
+            const indexKey = `backchannel:sid:${payload.sid}`;
+
+            try {
+                const sessionId = await config.sessionStore.getSingle(indexKey);
+
+                if (sessionId) {
+                    await config.sessionStore.delete(`session:${sessionId}`);
+                    await config.sessionStore.delete(indexKey);
+                }
+            } catch (e) {
+                // The token itself was already validated above - a session-store failure
+                // here is also an infrastructure problem, not a reason to tell Keycloak the
+                // token was bad.
+                return new Response(null, {status: 503});
+            }
+        }
+
+        return new Response(null, {status: 200});
+    } catch (e) {
+        // A genuine Logout Token validation failure: bad signature, wrong iss/aud,
+        // expired/too old, or missing a required claim.
+        return json({error: "invalid_request"}, {status: 400});
+    }
 }
 
 const handleSignOutCallback: Handle = async ({event}) => {
@@ -718,6 +897,15 @@ const ValidateOidcConfiguration = (configuration: InternalOidcConfig): Array<str
     else {
         if (configuration.session.endpoint === undefined) {
             errors.push('Session endpoint is missing');
+        }
+    }
+
+    if (configuration.backchannelLogout === undefined) {
+        errors.push('Backchannel logout configuration is missing');
+    }
+    else {
+        if (configuration.backchannelLogout.endpoint === undefined) {
+            errors.push('Backchannel logout endpoint is missing');
         }
     }
 

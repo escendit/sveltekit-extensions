@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import * as client from 'openid-client';
+import * as jose from 'jose';
 import type { ISessionStore } from '@escendit/sveltekit-session';
 import type { Handle, RequestEvent } from '@sveltejs/kit';
 // @sveltejs/kit's own `sequence()` (used internally by both SessionMiddleware and
@@ -82,6 +83,17 @@ vi.mock('openid-client', async (importOriginal) => {
 		discovery: vi.fn(),
 		refreshTokenGrant: vi.fn(),
 		buildEndSessionUrl: vi.fn()
+	};
+});
+
+// Only createRemoteJWKSet is mocked - jwtVerify, SignJWT, decodeJwt etc. all stay real, so
+// Back-Channel Logout tests exercise genuine signature/claim verification against a
+// locally-generated test keypair instead of hitting a real jwks_uri over the network.
+vi.mock('jose', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('jose')>();
+	return {
+		...actual,
+		createRemoteJWKSet: vi.fn()
 	};
 });
 
@@ -478,5 +490,248 @@ describe('session endpoint (OpenID Connect Session Management 1.0)', () => {
 			sessionState: 'abc123',
 			checkSessionIframe: 'https://idp.example.com/realms/test/check-session'
 		});
+	});
+});
+
+describe('Back-Channel Logout', () => {
+	const ISSUER = 'https://invalid.keycloak.org/realms/master'; // matches Defaults.issuer
+	const CLIENT_ID = 'invalid-client'; // matches Defaults.clientId
+	const JWKS_URI = 'https://idp.example.com/realms/test/protocol/openid-connect/certs';
+	const BACKCHANNEL_LOGOUT_EVENTS_CLAIM = 'http://schemas.openid.net/event/backchannel-logout';
+
+	let signingKey: CryptoKey;
+	let otherKey: CryptoKey;
+
+	beforeAll(async () => {
+		const keyPair = await jose.generateKeyPair('RS256');
+		signingKey = keyPair.privateKey;
+
+		const publicJwk = await jose.exportJWK(keyPair.publicKey);
+		publicJwk.alg = 'RS256';
+		publicJwk.use = 'sig';
+		const localJwks = jose.createLocalJWKSet({ keys: [publicJwk] });
+		vi.mocked(jose.createRemoteJWKSet).mockReturnValue(localJwks as never);
+
+		// A second, unrelated keypair - signing with this instead of `signingKey` produces
+		// a token that fails signature verification against the mocked JWKS above.
+		otherKey = (await jose.generateKeyPair('RS256')).privateKey;
+	});
+
+	beforeEach(() => {
+		vi.mocked(client.discovery).mockResolvedValue({
+			serverMetadata: () => ({ jwks_uri: JWKS_URI })
+		} as never);
+	});
+
+	const signLogoutToken = async (
+		payload: Record<string, unknown>,
+		options: { key?: CryptoKey; issuer?: string; audience?: string } = {}
+	): Promise<string> => {
+		const jwt = new jose.SignJWT(payload)
+			.setProtectedHeader({ alg: 'RS256' })
+			.setIssuedAt()
+			.setIssuer(options.issuer ?? ISSUER)
+			.setAudience(options.audience ?? CLIENT_ID);
+
+		return jwt.sign(options.key ?? signingKey);
+	};
+
+	const makeBackchannelEvent = (logoutToken: string | undefined) => {
+		const url = new URL('http://localhost/.oidc/backchannel-logout');
+		const body = new URLSearchParams();
+		if (logoutToken !== undefined) body.set('logout_token', logoutToken);
+
+		return {
+			url,
+			request: new Request(url, { method: 'POST', body }),
+			cookies: { get: () => undefined, set: () => {}, delete: () => {} },
+			setHeaders: () => {},
+			locals: {} as Record<string, unknown>
+		};
+	};
+
+	it('clears the matching local session when the Logout Token carries a known sid', async () => {
+		const config = baseConfig();
+		const sessionId = 'sess-backchannel-1';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({ authenticated: true }),
+			'created',
+			Date.now().toString()
+		]);
+		await config.sessionStore.setSingle('backchannel:sid:sid-1', sessionId);
+
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+
+		expect(response.status).toBe(200);
+		expect(await config.sessionStore.exists(`session:${sessionId}`)).toBe(false);
+		expect(await config.sessionStore.getSingle('backchannel:sid:sid-1')).toBeNull();
+		expect(resolve).not.toHaveBeenCalled();
+	});
+
+	it('responds 200 for a valid token whose sid has no matching local session', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-unknown',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(200);
+	});
+
+	it('responds 200 for a valid token with only sub (no sid), even though nothing local can be cleared', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(200);
+	});
+
+	it('rejects a request with no logout_token', async () => {
+		const config = baseConfig();
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(undefined);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(400);
+	});
+
+	it('rejects a Logout Token containing a nonce claim', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			nonce: 'should-not-be-here',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(400);
+	});
+
+	it('rejects a Logout Token missing the backchannel-logout events claim', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({ sub: 'user-1', sid: 'sid-1' });
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(400);
+	});
+
+	it('rejects a Logout Token signed with a different key than the OP publishes', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken(
+			{ sub: 'user-1', sid: 'sid-1', events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} } },
+			{ key: otherKey }
+		);
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(400);
+	});
+
+	it('rejects a Logout Token from an unexpected issuer', async () => {
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken(
+			{ sub: 'user-1', sid: 'sid-1', events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} } },
+			{ issuer: 'https://not-the-configured-issuer.example.com' }
+		);
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(response.status).toBe(400);
+	});
+
+	it('responds 503, not 400, when the JWKS/discovery infrastructure is unreachable', async () => {
+		// A completely valid, well-formed token - the failure here is purely that
+		// discovery itself never resolves, so remoteJWKSet rejects.
+		// mockRejectedValue (unlike `mockReturnValue(Promise.reject(...))`) creates the
+		// rejected promise fresh at call time, not at mock-setup time - avoiding a timing
+		// gap between the promise existing and OidcMiddleware's own .catch() attaching to
+		// it that would otherwise trip vitest's unhandled-rejection detection.
+		vi.mocked(client.discovery).mockRejectedValue(new TypeError('fetch failed'));
+
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+
+		// A 400 here would tell Keycloak this valid token was invalid, and it might give
+		// up retrying a genuine logout event over what was really our own outage.
+		expect(response.status).toBe(503);
+	});
+
+	it('responds 503, not 400, when the session store fails while clearing a matched session', async () => {
+		const config = baseConfig();
+		const sessionId = 'sess-backchannel-store-failure';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({ authenticated: true }),
+			'created',
+			Date.now().toString()
+		]);
+		await config.sessionStore.setSingle('backchannel:sid:sid-1', sessionId);
+		vi.spyOn(config.sessionStore, 'delete').mockRejectedValue(new Error('store unavailable'));
+
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+
+		// The token itself was valid - a store failure while acting on it is our problem,
+		// not grounds to tell Keycloak the token was bad.
+		expect(response.status).toBe(503);
 	});
 });
