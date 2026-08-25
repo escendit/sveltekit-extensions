@@ -15,10 +15,14 @@ A small monorepo of SvelteKit add‑ons maintained by Escendit. Each package liv
 
 ## Quick usage
 
-Install the package you need in your SvelteKit app (example):
+Install the package(s) you need in your SvelteKit app:
 
 ```sh
+# Session middleware only
 npm i @escendit/sveltekit-session
+
+# Keycloak auth (composes with the session middleware, so both are needed)
+npm i @escendit/sveltekit-auth-keycloak @escendit/sveltekit-session
 ```
 
 Then follow the corresponding package README for setup and APIs.
