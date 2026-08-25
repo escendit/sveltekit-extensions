@@ -86,7 +86,7 @@ Defaults (from the package):
 
 ```ts
 const defaults = {
-  cookie: 'session.id',
+  cookie: { name: 'session.id', secure: true },
   expireIn: 86400,
   size: 128,
   issuer: 'https://invalid.keycloak.org/realms/master',
@@ -102,6 +102,12 @@ const defaults = {
     page: '/account/signout',
     endpoint: '/.oidc/signout',
     callback: '/.oidc/signout/callback'
+  },
+  session: {
+    endpoint: '/.oidc/session'
+  },
+  backchannelLogout: {
+    endpoint: '/.oidc/backchannel-logout'
   }
 } satisfies OidcConfig;
 ```
@@ -111,7 +117,26 @@ Important options:
 - `clientId`, `clientSecret`: Credentials for your Keycloak client
 - `challenge.signin`: If `true`, unauthenticated requests are redirected to the sign-in endpoint
 - `signin.*` and `signout.*`: Paths for the pages/endpoints used during the flow
+- `session.endpoint`: Path for the [Session Management](#reacting-to-a-session-change-at-keycloak-openid-connect-session-management-10) data endpoint
+- `backchannelLogout.endpoint`: Path Keycloak POSTs Logout Tokens to for [Back-Channel Logout](#reacting-to-a-session-change-when-no-browser-tab-is-open-openid-connect-back-channel-logout-10)
 - Session options from `@escendit/sveltekit-session`: `cookie`, `expireIn`, `size`, `sessionStore`, `sessionHasher`, `sessionGenerator`
+
+Overriding the session/backchannel-logout endpoint paths:
+
+```ts
+OidcMiddleware({
+  issuer: process.env.KEYCLOAK_ISSUER!,
+  clientId: process.env.KEYCLOAK_CLIENT_ID!,
+  clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!,
+  session: {
+    endpoint: '/auth/session' // fetched by <SessionMonitor /> / createSessionMonitor
+  },
+  backchannelLogout: {
+    // Must match the "Backchannel Logout URL" configured on this client in Keycloak
+    endpoint: '/auth/backchannel-logout'
+  }
+});
+```
 
 ## Accessing identity in load/functions
 
