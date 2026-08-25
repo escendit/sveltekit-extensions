@@ -236,6 +236,15 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         configuredConfig.clientSecret,
     );
 
+    // Nothing awaits this promise synchronously at construction time, so an unreachable
+    // or misconfigured issuer would otherwise reject it with zero attached handlers -
+    // Node treats that as an unhandled rejection and crashes the whole process on
+    // startup, taking down every route, not just OIDC ones. Attaching a no-op handler
+    // here only marks the rejection as "observed" for that purpose; it doesn't consume
+    // the value, so every real per-request `await config.oidcConfiguration` below still
+    // sees the same rejection and surfaces it as a normal per-request error.
+    configuredConfig.oidcConfiguration.catch(() => {});
+
     const handleOidcMiddleware: Handle = async (request) => {
         return handleOidcMiddlewareInternal(request, configuredConfig);
     };

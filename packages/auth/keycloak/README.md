@@ -162,6 +162,7 @@ Visiting it clears the local session immediately, then performs RP-Initiated Log
 - Got `invalid_challenge` or `invalid_callback`? Ensure the callback URL configured in Keycloak matches `signin.callback` exactly (the challenge is correlated via the `state` parameter, which Keycloak round-trips automatically — no manual query parameter is needed).
 - `issuer mismatched` errors: Verify `KEYCLOAK_ISSUER` matches the realm’s issuer exactly.
 - Cookies not set locally: Use `http://localhost` and ensure you’re not mixing `http` and `https`. Also check the session cookie name and domain.
+- Unreachable or misconfigured `issuer`: OIDC discovery runs once when `OidcMiddleware` is constructed and is reused for every request. If it fails (unreachable issuer, DNS failure, etc.) the server itself keeps running - only requests that actually need the discovered configuration (sign-in, sign-out, token refresh) fail per-request, instead of crashing the whole process.
 
 ## Related
 

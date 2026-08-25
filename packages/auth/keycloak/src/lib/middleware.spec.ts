@@ -355,3 +355,39 @@ describe('access-token refresh', () => {
 		expect(resolve).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe('OIDC discovery failure', () => {
+	// Whether an unattached rejected promise actually crashes the process is verified
+	// separately, end-to-end: before this fix, `bun run test:e2e` in this package crashed
+	// the preview server outright on startup (the demo app's default issuer is
+	// unreachable); after it, the server survives and the demo test passes. That can't be
+	// reliably observed from inside a single vitest worker process, which already installs
+	// its own process-wide unhandledRejection handling to keep unrelated failures from
+	// taking down the whole test run - so a rejected promise with zero attached handlers
+	// here doesn't actually reproduce the crash this fix addresses. What *is* reliably
+	// unit-testable is the other half of the fix: that attaching a no-op handler to
+	// silence the unhandled-rejection crash must not also swallow the failure for real
+	// per-request consumers - it must still propagate normally to them.
+	it('still surfaces a discovery failure to per-request consumers instead of silently swallowing it', async () => {
+		const discoveryError = new TypeError('fetch failed');
+		vi.mocked(client.discovery).mockReturnValueOnce(Promise.reject(discoveryError));
+
+		const config = baseConfig();
+		const sessionId = 'sess-discovery-failure';
+		const sessionKey = `session:${sessionId}`;
+		// An existing but unauthenticated session, so the middleware routes to the sign-in
+		// endpoint (which awaits config.oidcConfiguration) instead of short-circuiting.
+		await config.sessionStore.setMultiple(sessionKey, [
+			'identity',
+			JSON.stringify(null),
+			'created',
+			Date.now().toString()
+		]);
+
+		const handle = OidcMiddleware(config);
+		const event = makeEvent('/.oidc/signin', sessionId);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		await expect(invokeHandle(handle, event as never, resolve)).rejects.toThrow(discoveryError);
+	});
+});
