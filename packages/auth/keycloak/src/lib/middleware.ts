@@ -1,5 +1,6 @@
 import type {Handle, InternalMiddlewareHandle, InternalOidcConfig, Middleware, OidcConfig} from "$lib/types.js";
 import type {RequestEvent} from "@sveltejs/kit";
+import type {ISessionStore} from "@escendit/sveltekit-session";
 import {json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
@@ -32,6 +33,98 @@ const SanitizeRedirectUri = (event: RequestEvent, candidate: string | null): str
     }
 
     return event.url.origin;
+}
+
+/**
+ * True if the stored identity's access token has expired. `accessTokenExpiresAt` comes
+ * back from JSON.parse as a plain string, not a revived Date, hence the re-parse. A
+ * missing expiry (the authorization server didn't return `expires_in`) is treated as
+ * "unknown, assume still valid" rather than forcing a refresh on every request.
+ */
+const IsAccessTokenExpired = (identity: any): boolean => {
+    if (!identity.accessTokenExpiresAt) {
+        return false;
+    }
+
+    return new Date(identity.accessTokenExpiresAt).getTime() <= Date.now();
+}
+
+/**
+ * Refresh an expired access token using the stored refresh token, replacing the session's
+ * identity with the new tokens. Returns the new identity on success, or null when there's
+ * no refresh token to use or the authorization server has genuinely rejected it (expired,
+ * revoked, or already consumed) - callers should treat null as "no longer authenticated".
+ */
+const RefreshIdentity = async (
+    config: InternalOidcConfig,
+    store: ISessionStore,
+    sessionId: string,
+    identity: any
+): Promise<Record<string, any> | null> => {
+    if (!identity.refreshTokenRaw) {
+        await store.delete(`session:${sessionId}`);
+        return null;
+    }
+
+    try {
+        const configuration = await config.oidcConfiguration;
+        const data = await client.refreshTokenGrant(configuration, identity.refreshTokenRaw);
+
+        const accessToken = jose.decodeJwt(data.access_token);
+        const refreshToken = data.refresh_token ? jose.decodeJwt(data.refresh_token) : identity.refreshToken ?? null;
+        const idToken = data.id_token ? jose.decodeJwt(data.id_token) : identity.idToken ?? null;
+        const expiresInSeconds = data.expiresIn();
+
+        const sessionData = {
+            authenticated: true,
+            validationErrors: identity.validationErrors ?? [],
+            accessTokenRaw: data.access_token,
+            accessTokenExpiresAt: expiresInSeconds !== undefined ? new Date(Date.now() + expiresInSeconds * 1000) : null,
+            accessTokenExpiresInSeconds: expiresInSeconds ?? null,
+            // Keycloak may not rotate the refresh token on every refresh - keep the
+            // existing one when the server doesn't send a new one.
+            refreshTokenRaw: data.refresh_token ?? identity.refreshTokenRaw,
+            idTokenRaw: data.id_token ?? identity.idTokenRaw ?? null,
+            tokenType: data.token_type,
+            scopes: data.scope?.split(' ') ?? identity.scopes ?? [],
+            sessionState: identity.sessionState,
+            accessToken,
+            refreshToken,
+            idToken,
+        };
+
+        await store.setMultiple(`session:${sessionId}`, [
+            "identity",
+            JSON.stringify(sessionData),
+        ]);
+
+        return sessionData;
+    } catch (e) {
+        if (e instanceof client.ResponseBodyError) {
+            // Concurrent requests can race to refresh the same expired identity. If
+            // Keycloak rotates refresh tokens, whichever request loses the race gets
+            // rejected here even though the session was, moments ago, successfully
+            // refreshed by the winner. Re-read before giving up on the session: if the
+            // stored refresh token no longer matches the one we tried, someone else
+            // already won the race - use their result instead of logging the user out.
+            const [currentIdentityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
+            const currentIdentity = currentIdentityJson ? JSON.parse(currentIdentityJson) : null;
+
+            if (currentIdentity && currentIdentity.refreshTokenRaw !== identity.refreshTokenRaw) {
+                return currentIdentity;
+            }
+
+            // The authorization server genuinely rejected the refresh token (expired,
+            // revoked, or already consumed) - the session can't be recovered.
+            await store.delete(`session:${sessionId}`);
+            return null;
+        }
+
+        // Transient failure (network, discovery, session-store write, etc.) - don't
+        // destroy a possibly-still-valid session over what might be a blip. Propagate so
+        // the request fails loudly instead of silently logging the user out.
+        throw e;
+    }
 }
 
 const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
@@ -175,6 +268,22 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
     }
 
     if (identity) {
+        if (IsAccessTokenExpired(identity)) {
+            const refreshedIdentity = await RefreshIdentity(config, store, sessionId, identity);
+
+            // SessionMiddleware already populated event.locals.session.identity with the
+            // (now stale) pre-refresh snapshot before this handler ran. Overwrite it so
+            // downstream load functions/endpoints see the outcome of the refresh instead
+            // of the expired tokens or a session that's actually been cleared.
+            event.locals.session.identity = refreshedIdentity;
+
+            if (!refreshedIdentity) {
+                // Refresh failed (or wasn't possible) and the session was cleared - fall
+                // through to the normal unauthenticated handling below.
+                return handleOidcMiddlewareInternal(request, config);
+            }
+        }
+
         return resolve(event);
     }
 
