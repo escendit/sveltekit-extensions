@@ -35,6 +35,9 @@ type OidcConfig = SessionConfig & {
         endpoint?: string;
         callback?: string;
     };
+    session?: {
+        endpoint?: string;
+    };
     issuer?: string;
     clientId?: string;
     clientSecret?: string;
@@ -68,6 +71,9 @@ type InternalOidcConfig = InternalSessionConfig & {
         page: string;
         endpoint: string;
         callback: string;
+    };
+    session: {
+        endpoint: string;
     };
     issuer: string;
     clientId: string;

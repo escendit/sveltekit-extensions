@@ -143,6 +143,9 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         signout: {
             ...Defaults.signout,
         },
+        session: {
+            ...Defaults.session,
+        },
     };
 
     if (config?.cookie !== undefined) {
@@ -209,6 +212,12 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         }
     }
 
+    if (config?.session !== undefined) {
+        if (config.session.endpoint !== undefined) {
+            configuredConfig.session.endpoint = config.session.endpoint;
+        }
+    }
+
     if (config?.issuer !== undefined) {
         configuredConfig.issuer = config.issuer;
     }
@@ -264,9 +273,13 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
     const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
     const identity = identityJson ? JSON.parse(identityJson) : null;
 
-    // Sign-out routes must stay reachable regardless of auth state - that's the whole
-    // point of sign-out. Checked before the identity gate below, which is specifically
-    // for sign-in routes (no point re-running the login flow for an authenticated user).
+    // Sign-out and session-check routes must stay reachable regardless of auth state -
+    // sign-out for the obvious reason, and the session-check endpoint because the client-
+    // side OP Iframe polling loop (OpenID Connect Session Management 1.0) needs to be able
+    // to ask "is there still a session, and if so what's its session_state" independent of
+    // whether the request itself carries one. Checked before the identity gate below,
+    // which is specifically for sign-in routes (no point re-running the login flow for an
+    // authenticated user).
     switch (event.url.pathname) {
         case `${config.signout?.endpoint}`:
             return handleSignOutEndpoint(request);
@@ -274,6 +287,8 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
             return handleSignOutCallback(request);
         case `${config.signout?.page}`:
             return handleSignOutPage(request);
+        case `${config.session?.endpoint}`:
+            return handleSessionEndpoint(request);
     }
 
     if (identity) {
@@ -556,6 +571,43 @@ const handleSignOutEndpoint: Handle = async ({event}) => {
     }
 }
 
+/**
+ * Feeds the client-side OpenID Connect Session Management 1.0 iframe-polling loop
+ * (`createSessionMonitor` in `$lib/client`) the pieces it needs to talk to the OP's
+ * check_session_iframe directly: the discovered iframe URL, the client_id, and the
+ * session_state issued alongside the current tokens. Deliberately has no server-side
+ * effect (no session read/write beyond a lookup) - it's a read-only bridge between the
+ * server-held session_state and the browser polling loop that has to run independently
+ * of any particular page request.
+ */
+const handleSessionEndpoint: Handle = async ({event}) => {
+    const {config, store, sessionId} = event.locals;
+
+    const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
+    const identity = identityJson ? JSON.parse(identityJson) : null;
+
+    if (!identity?.sessionState) {
+        return json({authenticated: false});
+    }
+
+    const configuration = await config.oidcConfiguration;
+    const checkSessionIframe = configuration.serverMetadata().check_session_iframe;
+
+    if (typeof checkSessionIframe !== "string") {
+        // The OP didn't advertise Session Management support in its discovery document -
+        // nothing for the client-side polling loop to do.
+        return json({authenticated: true, sessionManagementSupported: false});
+    }
+
+    return json({
+        authenticated: true,
+        sessionManagementSupported: true,
+        clientId: config.clientId,
+        sessionState: identity.sessionState,
+        checkSessionIframe,
+    });
+}
+
 const handleSignOutCallback: Handle = async ({event}) => {
     const {store} = event.locals;
     const state = event.url.searchParams.get('state');
@@ -649,6 +701,15 @@ const ValidateOidcConfiguration = (configuration: InternalOidcConfig): Array<str
         }
         if (configuration.signout.callback === undefined) {
             errors.push('Signout callback is missing');
+        }
+    }
+
+    if (configuration.session === undefined) {
+        errors.push('Session configuration is missing');
+    }
+    else {
+        if (configuration.session.endpoint === undefined) {
+            errors.push('Session endpoint is missing');
         }
     }
 

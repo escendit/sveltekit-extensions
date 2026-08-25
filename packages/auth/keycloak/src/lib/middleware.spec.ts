@@ -391,3 +391,74 @@ describe('OIDC discovery failure', () => {
 		await expect(invokeHandle(handle, event as never, resolve)).rejects.toThrow(discoveryError);
 	});
 });
+
+describe('session endpoint (OpenID Connect Session Management 1.0)', () => {
+	it('reports unauthenticated for a session with no identity', async () => {
+		const config = baseConfig();
+		const sessionId = 'sess-session-endpoint-unauth';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify(null),
+			'created',
+			Date.now().toString()
+		]);
+
+		const handle = OidcMiddleware(config);
+		const event = makeEvent('/.oidc/session', sessionId);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(await response.json()).toEqual({authenticated: false});
+		expect(resolve).not.toHaveBeenCalled();
+	});
+
+	it('reports authenticated without session-management support when the OP does not advertise check_session_iframe', async () => {
+		vi.mocked(client.discovery).mockResolvedValueOnce({
+			serverMetadata: () => ({})
+		} as never);
+
+		const config = baseConfig();
+		const sessionId = 'sess-session-endpoint-no-iframe';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({authenticated: true, sessionState: 'abc123'}),
+			'created',
+			Date.now().toString()
+		]);
+
+		const handle = OidcMiddleware(config);
+		const event = makeEvent('/.oidc/session', sessionId);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(await response.json()).toEqual({authenticated: true, sessionManagementSupported: false});
+	});
+
+	it('returns clientId, sessionState, and checkSessionIframe when the OP supports Session Management', async () => {
+		vi.mocked(client.discovery).mockResolvedValueOnce({
+			serverMetadata: () => ({check_session_iframe: 'https://idp.example.com/realms/test/check-session'})
+		} as never);
+
+		const config = baseConfig();
+		const sessionId = 'sess-session-endpoint-supported';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({authenticated: true, sessionState: 'abc123'}),
+			'created',
+			Date.now().toString()
+		]);
+
+		const handle = OidcMiddleware(config);
+		const event = makeEvent('/.oidc/session', sessionId);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(await response.json()).toEqual({
+			authenticated: true,
+			sessionManagementSupported: true,
+			clientId: 'invalid-client',
+			sessionState: 'abc123',
+			checkSessionIframe: 'https://idp.example.com/realms/test/check-session'
+		});
+	});
+});

@@ -25,6 +25,9 @@ const Defaults: InternalOidcConfig = {
         endpoint: "/.oidc/signout",
         callback: "/.oidc/signout/callback",
     },
+    session: {
+        endpoint: "/.oidc/session",
+    },
     clientId: "invalid-client",
     clientSecret: "invalid-secret",
 };
