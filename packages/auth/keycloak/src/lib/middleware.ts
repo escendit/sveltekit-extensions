@@ -1,10 +1,38 @@
 import type {Handle, InternalMiddlewareHandle, InternalOidcConfig, Middleware, OidcConfig} from "$lib/types.js";
+import type {RequestEvent} from "@sveltejs/kit";
 import {json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
 import {Defaults} from "$lib/config.js";
 import * as client from "openid-client";
 import * as jose from "jose";
+
+// How long an in-flight sign-in/sign-out challenge is kept in the session store before
+// it's considered abandoned. Bounds the resource leak from users who start a flow but
+// never complete the round trip (closed tab, IdP unreachable, etc.).
+const CHALLENGE_TTL_SECONDS = 600;
+
+/**
+ * Only accept a `redirect_uri` that resolves to the same origin as the current request.
+ * Without this, an attacker-supplied `redirect_uri` (e.g. `?redirect_uri=https://evil.example`)
+ * would be stored and later sent back as a post-authentication/post-logout redirect target -
+ * an open redirect.
+ */
+const SanitizeRedirectUri = (event: RequestEvent, candidate: string | null): string => {
+    if (candidate !== null) {
+        try {
+            const resolved = new URL(candidate, event.url.origin);
+
+            if (resolved.origin === event.url.origin) {
+                return resolved.toString();
+            }
+        } catch {
+            // fall through to the origin below
+        }
+    }
+
+    return event.url.origin;
+}
 
 const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
 
@@ -134,6 +162,18 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
     const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
     const identity = identityJson ? JSON.parse(identityJson) : null;
 
+    // Sign-out routes must stay reachable regardless of auth state - that's the whole
+    // point of sign-out. Checked before the identity gate below, which is specifically
+    // for sign-in routes (no point re-running the login flow for an authenticated user).
+    switch (event.url.pathname) {
+        case `${config.signout?.endpoint}`:
+            return handleSignOutEndpoint(request);
+        case `${config.signout?.callback}`:
+            return handleSignOutCallback(request);
+        case `${config.signout?.page}`:
+            return handleSignOutPage(request);
+    }
+
     if (identity) {
         return resolve(event);
     }
@@ -148,12 +188,6 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
             return handleSignInEndpoint(request);
         case `${config.signin?.callback}`:
             return handleSignInCallback(request);
-        case `${config.signout?.page}`:
-            return handleSignOutPage(request);
-        case `${config.signout?.endpoint}`:
-            return handleSignOutEndpoint(request);
-        case `${config.signout?.callback}`:
-            return handleSignOutCallback(request);
     }
 
     // Automatic Sign-in
@@ -194,11 +228,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
         return resolve(event);
     }
 
-    let parsedRedirectUri = event.url.searchParams.get('redirect_uri');
-
-    if (parsedRedirectUri === null) {
-        parsedRedirectUri = new URL(`${event.url.origin}`).toString();
-    }
+    const parsedRedirectUri = SanitizeRedirectUri(event, event.url.searchParams.get('redirect_uri'));
 
     // create the challenge
     // The redirect_uri must stay static (no query params) - openid-client derives the
@@ -221,6 +251,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // store the challenge
     await store.setSingle(`challenge:signIn:${state}`, JSON.stringify(challenge));
+    await store.expire(`challenge:signIn:${state}`, CHALLENGE_TTL_SECONDS);
 
     // build authorization url
     const configuration = await config.oidcConfiguration;
@@ -351,12 +382,82 @@ const handleSignOutPage: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSignOutEndpoint: Handle = async ({event, resolve}) => {
-    return resolve(event);
+const handleSignOutEndpoint: Handle = async ({event}) => {
+    const {config, store, sessionId} = event.locals;
+
+    // Read the identity before clearing it so we can pass id_token_hint - this lets
+    // Keycloak end the correct SSO session without prompting the user to pick one.
+    const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
+    const identity = identityJson ? JSON.parse(identityJson) : null;
+
+    // Clear the local session immediately. The RP-initiated logout redirect below is
+    // best-effort - even if it never completes (user closes the tab, IdP is down), the
+    // local app session must already be gone.
+    await store.delete(`session:${sessionId}`);
+
+    const parsedRedirectUri = SanitizeRedirectUri(event, event.url.searchParams.get('redirect_uri'));
+
+    const state = client.randomState();
+    const postLogoutRedirectUri = `${event.url.origin}${config.signout.callback}`;
+
+    await store.setSingle(`challenge:signOut:${state}`, JSON.stringify({
+        originalRedirectUri: parsedRedirectUri,
+    }));
+    await store.expire(`challenge:signOut:${state}`, CHALLENGE_TTL_SECONDS);
+
+    try {
+        const configuration = await config.oidcConfiguration;
+        const endSessionParams: Record<string, string> = {
+            post_logout_redirect_uri: postLogoutRedirectUri,
+            state,
+        };
+
+        if (identity?.idTokenRaw) {
+            endSessionParams.id_token_hint = identity.idTokenRaw;
+        }
+
+        const endSessionUri = client.buildEndSessionUrl(configuration, endSessionParams);
+
+        return new Response(null, {
+            status: 307,
+            headers: {
+                Location: endSessionUri.toString(),
+            },
+        });
+    } catch (e) {
+        // RP-initiated logout isn't available (e.g. no end_session_endpoint discovered).
+        // The local session is already cleared above, so just send the user on their way.
+        await store.delete(`challenge:signOut:${state}`);
+
+        return new Response(null, {
+            status: 307,
+            headers: {
+                Location: parsedRedirectUri,
+            },
+        });
+    }
 }
 
-const handleSignOutCallback: Handle = async ({event, resolve}) => {
-    return resolve(event);
+const handleSignOutCallback: Handle = async ({event}) => {
+    const {store} = event.locals;
+    const state = event.url.searchParams.get('state');
+
+    const challengeJson = state !== null ? await store.getSingle(`challenge:signOut:${state}`) : null;
+
+    let redirectTo = event.url.origin;
+
+    if (challengeJson !== null) {
+        const challenge = JSON.parse(challengeJson);
+        redirectTo = challenge.originalRedirectUri;
+        await store.delete(`challenge:signOut:${state}`);
+    }
+
+    return new Response(null, {
+        status: 307,
+        headers: {
+            Location: redirectTo,
+        },
+    });
 }
 
 const ValidateOidcConfiguration = (configuration: InternalOidcConfig): Array<string> => {
