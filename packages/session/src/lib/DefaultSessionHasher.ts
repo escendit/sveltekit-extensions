@@ -1,4 +1,4 @@
-import type { ISessionHasher } from '#lib/ISessionHasher.js';
+import type { ISessionHasher } from '$lib/ISessionHasher.js';
 import {binary_to_base58} from "base58-js";
 
 /**

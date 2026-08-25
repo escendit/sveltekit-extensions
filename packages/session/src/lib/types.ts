@@ -1,7 +1,7 @@
 import type { RequestEvent } from '@sveltejs/kit';
-import type { ISessionStore } from '#lib/ISessionStore.js';
-import type { ISessionHasher } from '#lib/ISessionHasher.js';
-import type { ISessionGenerator } from '#lib/ISessionGenerator.js';
+import type { ISessionStore } from '$lib/ISessionStore.js';
+import type { ISessionHasher } from '$lib/ISessionHasher.js';
+import type { ISessionGenerator } from '$lib/ISessionGenerator.js';
 
 /**
  * Public Session configuration.

@@ -1,4 +1,4 @@
-import type { ISessionGenerator } from '#lib/ISessionGenerator.js';
+import type { ISessionGenerator } from '$lib/ISessionGenerator.js';
 import crypto from "node:crypto";
 
 /**

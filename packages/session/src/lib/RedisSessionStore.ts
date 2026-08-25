@@ -1,4 +1,4 @@
-import type { ISessionStore } from '#lib/ISessionStore.js';
+import type { ISessionStore } from '$lib/ISessionStore.js';
 import {redis, type RedisClient} from "bun";
 
 /**

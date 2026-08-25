@@ -1,9 +1,9 @@
 import { redirect } from '@sveltejs/kit';
-import type { Handle, InternalMiddlewareHandle, InternalSessionConfig, SessionConfig } from '#lib/types.js';
-import { Defaults } from '#lib/config.js';
-import type { ISessionStore } from '#lib/ISessionStore.js';
-import type { ISessionHasher } from '#lib/ISessionHasher.js';
-import type { ISessionGenerator } from '#lib/ISessionGenerator.js';
+import type { Handle, InternalMiddlewareHandle, InternalSessionConfig, SessionConfig } from '$lib/types.js';
+import { Defaults } from '$lib/config.js';
+import type { ISessionStore } from '$lib/ISessionStore.js';
+import type { ISessionHasher } from '$lib/ISessionHasher.js';
+import type { ISessionGenerator } from '$lib/ISessionGenerator.js';
 import { sequence } from '@sveltejs/kit/hooks';
 
 /**
