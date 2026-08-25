@@ -297,7 +297,7 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         configuredConfig.clientId,
         configuredConfig.clientSecret,
         undefined,
-        configuredConfig.allowInsecureRequests
+        configuredConfig.allowInsecureRequests === true
             ? {execute: [client.allowInsecureRequests]}
             : undefined,
     );

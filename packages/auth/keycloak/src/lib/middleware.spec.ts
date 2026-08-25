@@ -737,6 +737,10 @@ describe('Back-Channel Logout', () => {
 });
 
 describe('allowInsecureRequests', () => {
+	beforeEach(() => {
+		vi.mocked(client.discovery).mockClear();
+	});
+
 	it('does not pass an execute option to discovery() by default', () => {
 		OidcMiddleware(baseConfig());
 
