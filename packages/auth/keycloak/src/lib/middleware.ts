@@ -272,6 +272,10 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         configuredConfig.clientSecret = config.clientSecret;
     }
 
+    if (config?.allowInsecureRequests !== undefined) {
+        configuredConfig.allowInsecureRequests = config.allowInsecureRequests;
+    }
+
     const errors = ValidateOidcConfiguration(configuredConfig);
 
     if (errors.length > 0) {
@@ -281,10 +285,21 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
 
     // Discover once per middleware instance and reuse for every request rather than
     // rediscovering (a network round-trip) on each one.
+    //
+    // openid-client/oauth4webapi reject non-HTTPS issuers outright unless execute:
+    // [client.allowInsecureRequests] is explicitly passed here - it's not just a discovery
+    // flag, it also carries through to every subsequent request made with the resulting
+    // Configuration. Only opt in when allowInsecureRequests is explicitly set (e.g. for a
+    // local http://localhost Keycloak); the 4th positional argument (clientAuthentication)
+    // is left at its default by passing undefined.
     configuredConfig.oidcConfiguration = client.discovery(
         new URL(configuredConfig.issuer),
         configuredConfig.clientId,
         configuredConfig.clientSecret,
+        undefined,
+        configuredConfig.allowInsecureRequests
+            ? {execute: [client.allowInsecureRequests]}
+            : undefined,
     );
 
     // Nothing awaits this promise synchronously at construction time, so an unreachable

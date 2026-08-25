@@ -45,6 +45,13 @@ type OidcConfig = SessionConfig & {
     issuer?: string;
     clientId?: string;
     clientSecret?: string;
+    /**
+     * Allows plain-HTTP OIDC issuers (openid-client/oauth4webapi otherwise reject
+     * non-HTTPS issuers outright during discovery). Off by default - only turn this on for
+     * local development against an issuer like `http://localhost:8080/realms/dev`, never in
+     * an environment `issuer` could plausibly point somewhere real.
+     */
+    allowInsecureRequests?: boolean;
 };
 
 /**
@@ -85,6 +92,7 @@ type InternalOidcConfig = InternalSessionConfig & {
     issuer: string;
     clientId: string;
     clientSecret: string;
+    allowInsecureRequests: boolean;
     /**
      * Discovered openid-client Configuration, resolved once when the middleware is
      * constructed and reused for every request rather than rediscovering per-request.

@@ -108,7 +108,8 @@ const defaults = {
   },
   backchannelLogout: {
     endpoint: '/.oidc/backchannel-logout'
-  }
+  },
+  allowInsecureRequests: false
 } satisfies OidcConfig;
 ```
 
@@ -119,6 +120,7 @@ Important options:
 - `signin.*` and `signout.*`: Paths for the pages/endpoints used during the flow
 - `session.endpoint`: Path for the [Session Management](#reacting-to-a-session-change-at-keycloak-openid-connect-session-management-10) data endpoint
 - `backchannelLogout.endpoint`: Path Keycloak POSTs Logout Tokens to for [Back-Channel Logout](#reacting-to-a-session-change-when-no-browser-tab-is-open-openid-connect-back-channel-logout-10)
+- `allowInsecureRequests`: Set to `true` to allow a plain-HTTP `issuer` (e.g. `http://localhost:8080/realms/dev`) - `openid-client`/`oauth4webapi` reject non-HTTPS issuers outright otherwise. Off by default; only enable it for local development, never in an environment `issuer` could plausibly point somewhere real.
 - Session options from `@escendit/sveltekit-session`: `cookie`, `expireIn`, `size`, `sessionStore`, `sessionHasher`, `sessionGenerator`
 
 Overriding the session/backchannel-logout endpoint paths:
@@ -270,6 +272,7 @@ Two things worth knowing about the current scope:
 - `issuer mismatched` errors: Verify `KEYCLOAK_ISSUER` matches the realm’s issuer exactly.
 - Cookies not set locally: Use `http://localhost` and ensure you’re not mixing `http` and `https`. Also check the session cookie name and domain.
 - Unreachable or misconfigured `issuer`: OIDC discovery runs once when `OidcMiddleware` is constructed and is reused for every request. If it fails (unreachable issuer, DNS failure, etc.) the server itself keeps running rather than crashing. Sign-in and token refresh, which need the discovered configuration, fail per-request. Sign-out degrades gracefully instead: the local session is still cleared, and the user is redirected directly to `redirect_uri` (skipping the Keycloak round trip) rather than the request failing.
+- Local Keycloak on plain HTTP (e.g. `http://localhost:8080/realms/dev`) fails discovery with a generic-looking error: set `allowInsecureRequests: true` (see Configuration above) - without it, `openid-client` rejects non-HTTPS issuers outright.
 
 ## Related
 
