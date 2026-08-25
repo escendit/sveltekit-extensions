@@ -3,6 +3,7 @@ import {type ISessionHasher} from "@escendit/sveltekit-session";
 import {type ISessionGenerator} from "@escendit/sveltekit-session";
 import type {SessionConfig} from "@escendit/sveltekit-session";
 import type {RequestEvent} from "@sveltejs/kit";
+import type {Configuration} from "openid-client";
 
 /**
  * Similar to @sveltejs/kit's `Handle` type, but intentionally widens `resolve`'s options
@@ -71,6 +72,11 @@ type InternalOidcConfig = InternalSessionConfig & {
     issuer: string;
     clientId: string;
     clientSecret: string;
+    /**
+     * Discovered openid-client Configuration, resolved once when the middleware is
+     * constructed and reused for every request rather than rediscovering per-request.
+     */
+    oidcConfiguration: Promise<Configuration>;
 };
 
 type MaybePromise<T> = T | Promise<T>;

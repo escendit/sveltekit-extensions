@@ -40,8 +40,8 @@
   },
   "dependencies": {
     "@escendit/sveltekit-session": "0.0.0",
-    "arctic": "^3.7.0",
-    "jose": "^6.1.2"
+    "jose": "^6.1.2",
+    "openid-client": "^6.8.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

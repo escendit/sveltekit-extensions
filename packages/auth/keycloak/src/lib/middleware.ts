@@ -3,8 +3,7 @@ import {json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
 import {Defaults} from "$lib/config.js";
-import {KeyCloak} from "arctic";
-import * as arctic from "arctic";
+import * as client from "openid-client";
 import * as jose from "jose";
 
 const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
@@ -108,6 +107,14 @@ const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
         throw new Error('Invalid oidc config');
     }
 
+    // Discover once per middleware instance and reuse for every request rather than
+    // rediscovering (a network round-trip) on each one.
+    configuredConfig.oidcConfiguration = client.discovery(
+        new URL(configuredConfig.issuer),
+        configuredConfig.clientId,
+        configuredConfig.clientSecret,
+    );
+
     const handleOidcMiddleware: Handle = async (request) => {
         return handleOidcMiddlewareInternal(request, configuredConfig);
     };
@@ -176,11 +183,8 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // signin process starts here
     // fetch session id
-    const {config, store, hasher, generator, sessionId} = event.locals;
+    const {config, store, sessionId} = event.locals;
     const relativeSignInCallback = config.signin?.callback;
-    const issuer = config.issuer;
-    const clientId = config.clientId;
-    const clientSecret = config.clientSecret;
 
     // get current session data if they exist
     const [identityJson, _] = await store.getMultiple(`session:${sessionId}`, ["identity", "created"]);
@@ -197,15 +201,18 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
     }
 
     // create the challenge
+    // The redirect_uri must stay static (no query params) - openid-client derives the
+    // redirect_uri it sends to the token endpoint by stripping currentUrl's query params,
+    // so a per-request query param here would cause a redirect_uri mismatch at token
+    // exchange. `state` doubles as the challenge lookup key instead.
     const originalRedirectUri = parsedRedirectUri;
-    const state = arctic.generateState();
-    const codeVerifier = arctic.generateCodeVerifier();
-    const challengeId = hasher.hash(generator.generate(config.size));
+    const state = client.randomState();
+    const codeVerifier = client.randomPKCECodeVerifier();
+    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
     const scopes = ['openid', 'profile'];
-    const redirectUri = `${event.url.origin}${relativeSignInCallback}?challenge=${challengeId}`;
+    const redirectUri = `${event.url.origin}${relativeSignInCallback}`;
 
     const challenge = {
-        state,
         codeVerifier,
         originalRedirectUri,
         redirectUri,
@@ -213,11 +220,17 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
     }
 
     // store the challenge
-    await store.setSingle(`challenge:signIn:${challengeId}`, JSON.stringify(challenge));
+    await store.setSingle(`challenge:signIn:${state}`, JSON.stringify(challenge));
 
     // build authorization url
-    const identityProvider = new KeyCloak(issuer, clientId, clientSecret, redirectUri);
-    const authorizationUri = identityProvider.createAuthorizationURL(state, codeVerifier, scopes);
+    const configuration = await config.oidcConfiguration;
+    const authorizationUri = client.buildAuthorizationUrl(configuration, {
+        redirect_uri: redirectUri,
+        scope: scopes.join(' '),
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+    });
 
     // redirect here to the keycloak signin page
     return new Response(null, {
@@ -233,18 +246,13 @@ const handleSignInCallback: Handle = async ({event}) => {
 
     const {config, store, sessionId} = event.locals;
     const issuer = config.issuer;
-    const clientId = config.clientId;
-    const clientSecret = config.clientSecret;
     const {
-        challenge: challengeId,
         state,
         session_state,
         iss,
-        code,
     } = Object.fromEntries(event.url.searchParams.entries());
 
-
-    const challengeJson = await store.getSingle(`challenge:signIn:${challengeId}`);
+    const challengeJson = state !== undefined ? await store.getSingle(`challenge:signIn:${state}`) : null;
 
     if (challengeJson === null) {
         return json({
@@ -257,16 +265,12 @@ const handleSignInCallback: Handle = async ({event}) => {
 
     const challenge = JSON.parse(challengeJson);
 
-    if (state !== challenge?.state) {
-        validationErrors.push("State mismatched");
-    }
-
-    if (iss !== issuer) {
+    if (iss !== undefined && iss !== issuer) {
         validationErrors.push("Issuer mismatched");
     }
 
     if (validationErrors.length > 0) {
-        await store.delete(`challenge:signIn:${challengeId}`);
+        await store.delete(`challenge:signIn:${state}`);
         return json(
             {
                 error: "invalid_callback",
@@ -277,25 +281,28 @@ const handleSignInCallback: Handle = async ({event}) => {
         );
     }
 
-    const identityProvider = new KeyCloak(issuer, clientId, clientSecret, challenge.redirectUri);
-
     try {
-        const data = await identityProvider.validateAuthorizationCode(code, challenge.codeVerifier);
+        const configuration = await config.oidcConfiguration;
+        const data = await client.authorizationCodeGrant(configuration, event.url, {
+            expectedState: state,
+            pkceCodeVerifier: challenge.codeVerifier,
+        });
 
-        const accessToken = jose.decodeJwt(data.accessToken());
-        const refreshToken = jose.decodeJwt(data.refreshToken());
-        const idToken = jose.decodeJwt(data.idToken());
+        const accessToken = jose.decodeJwt(data.access_token);
+        const refreshToken = data.refresh_token ? jose.decodeJwt(data.refresh_token) : null;
+        const idToken = data.id_token ? jose.decodeJwt(data.id_token) : null;
+        const expiresInSeconds = data.expiresIn();
 
         const sessionData = {
             authenticated: true,
             validationErrors,
-            accessTokenRaw: data.accessToken(),
-            accessTokenExpiresAt: data.accessTokenExpiresAt(),
-            accessTokenExpiresInSeconds: data.accessTokenExpiresInSeconds(),
-            refreshTokenRaw: data.refreshToken(),
-            idTokenRaw: data.idToken(),
-            tokenType: data.tokenType(),
-            scopes: data.scopes(),
+            accessTokenRaw: data.access_token,
+            accessTokenExpiresAt: expiresInSeconds !== undefined ? new Date(Date.now() + expiresInSeconds * 1000) : null,
+            accessTokenExpiresInSeconds: expiresInSeconds ?? null,
+            refreshTokenRaw: data.refresh_token ?? null,
+            idTokenRaw: data.id_token ?? null,
+            tokenType: data.token_type,
+            scopes: data.scope?.split(' ') ?? [],
             sessionState: session_state,
             // expand data
             accessToken: accessToken,
@@ -306,7 +313,7 @@ const handleSignInCallback: Handle = async ({event}) => {
         const identityJson = JSON.stringify(sessionData);
 
         // delete challenge data, after a successful challenge
-        await store.delete(`challenge:signIn:${challengeId}`);
+        await store.delete(`challenge:signIn:${state}`);
 
         // mark the user for a session.
         await store.setMultiple(`session:${sessionId}`, [
@@ -323,12 +330,12 @@ const handleSignInCallback: Handle = async ({event}) => {
         });
     }
     catch (e) {
-        if (e instanceof arctic.OAuth2RequestError) {
+        if (e instanceof client.ResponseBodyError) {
         }
-        if (e instanceof arctic.ArcticFetchError) {
+        if (e instanceof client.AuthorizationResponseError) {
         }
 
-        await store.delete(`challenge:signIn:${challengeId}`);
+        await store.delete(`challenge:signIn:${state}`);
         await store.setMultiple(`session:${sessionId}`, [
             "identity",
             JSON.stringify(null),
