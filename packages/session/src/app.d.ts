@@ -1,6 +1,6 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
-import type { ISessionGenerator, ISessionHasher, ISessionStore } from '$lib';
+import type { ISessionGenerator, ISessionHasher, ISessionStore } from '#lib';
 
 declare global {
 	namespace App {
