@@ -4,36 +4,34 @@ on:
   push:
     branches:
       - main
-  pull_request_target:
+  pull_request:
     types:
       - edited
       - opened
       - reopened
       - synchronize
-  workflow_dispatch:
-    inputs:
-      release-type:
-        type: choice
-        default: prerelease
-        description: Release Type
-        options:
-          - release
-          - prerelease
-      identifier:
-        type: string
-        default: rc
-        description: Pre-Release Identifier
-        required: false
-      include-pre-releases:
-        type: boolean
-        default: true
-        description: Include Pre-Releases
+      - labeled
+      - unlabeled
 
 concurrency:
-  group: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && format('pr-{0}', github.event.number) || github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref_type != 'tag' }}
 
 jobs:
+  update_prerelease_draft:
+    name: "Update Pre-Release Draft"
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Draft Pre-Release"
+        uses: release-drafter/release-drafter@v7.3.1
+        with:
+          prerelease: true
+          prerelease-identifier: rc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   update_release_draft:
     name: "Update Release Draft"
     permissions:
@@ -42,10 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Draft Release"
-        uses: release-drafter/release-drafter@v7.2.0
+        uses: release-drafter/release-drafter@v7.3.1
         with:
-          prerelease: ${{ github.event.inputs.release-type != 'release' }}
-          prerelease-identifier: ${{ github.event.inputs.identifier }}
-          include-pre-releases: ${{ github.event.inputs.include-pre-releases }}
+          prerelease: false
+          prerelease-identifier: ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
