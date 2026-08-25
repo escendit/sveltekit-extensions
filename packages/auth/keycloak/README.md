@@ -2,7 +2,7 @@
 
 Keycloak/OpenID Connect authentication middleware for SvelteKit. It composes with `@escendit/sveltekit-session` to manage a secure session and performs the OIDC Authorization Code flow with PKCE using `openid-client` under the hood.
 
-Works with SvelteKit 2 and Svelte 5.
+Works with SvelteKit 2 or 3-next and Svelte 5.
 
 ## Features
 
@@ -28,7 +28,7 @@ bun add @escendit/sveltekit-auth-keycloak @escendit/sveltekit-session
 
 Peer/runtime expectations:
 - `svelte@^5`
-- `@sveltejs/kit@^2` (your app)
+- `@sveltejs/kit@^2.62.0 || ^3.0.0-next.25` (your app)
 
 ## Quick start
 
@@ -50,6 +50,10 @@ export const handle: Handle = sequence(
   })
 );
 ```
+
+> On SvelteKit 3-next, `Handle` is exported from `@sveltejs/kit/hooks` instead of
+> `@sveltejs/kit` — swap the import path above accordingly (`import type { Handle } from
+> '@sveltejs/kit/hooks';`). `OidcMiddleware`'s own return type is compatible with either.
 
 Provide a sign-in link somewhere in your app (defaults shown below):
 

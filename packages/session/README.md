@@ -25,7 +25,7 @@ bun add @escendit/sveltekit-session
 
 Peer dependencies:
 - `svelte@^5`
-- `@sveltejs/kit@^2` (app peer, used by you)
+- `@sveltejs/kit@^2.62.0 || ^3.0.0-next.25` (app peer, used by you)
 
 Notes:
 - The default in‑memory store works everywhere (Node/Bun) and is great for local development.
@@ -48,6 +48,10 @@ export const handle: Handle = sequence(
   })
 );
 ```
+
+> On SvelteKit 3-next, `Handle` is exported from `@sveltejs/kit/hooks` instead of
+> `@sveltejs/kit` — swap the import path above accordingly (`import type { Handle } from
+> '@sveltejs/kit/hooks';`). `SessionMiddleware`'s own return type is compatible with either.
 
 Access the session in your endpoints or load functions via `event.locals`:
 
