@@ -52,7 +52,7 @@
     "@vitest/browser-playwright": "^4.0.13",
     "playwright": "^1.56.1",
     "prettier": "^3.6.2",
-    "prettier-plugin-svelte": "^3.4.0",
+    "prettier-plugin-svelte": "^4.0.0",
     "publint": "^0.3.15",
     "svelte": "^5.56.4",
     "svelte-adapter-bun": "^1.0.1",
