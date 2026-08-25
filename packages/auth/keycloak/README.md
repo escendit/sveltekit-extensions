@@ -1,6 +1,6 @@
 # @escendit/sveltekit-auth-keycloak
 
-Keycloak/OpenID Connect authentication middleware for SvelteKit. It composes with `@escendit/sveltekit-session` to manage a secure session and performs the OIDC Authorization Code flow with PKCE using `arctic` under the hood.
+Keycloak/OpenID Connect authentication middleware for SvelteKit. It composes with `@escendit/sveltekit-session` to manage a secure session and performs the OIDC Authorization Code flow with PKCE using `openid-client` under the hood.
 
 Works with SvelteKit 2 and Svelte 5.
 
@@ -8,7 +8,7 @@ Works with SvelteKit 2 and Svelte 5.
 
 - Drop-in `OidcMiddleware` for `hooks.server.ts` (composes with session middleware)
 - Built on `@escendit/sveltekit-session` for secure, pluggable session storage
-- OIDC Authorization Code + PKCE with Keycloak via `arctic`
+- OIDC Authorization Code + PKCE with Keycloak via `openid-client`
 - Configurable endpoints and pages for sign-in and sign-out
 - Optional automatic sign-in challenge for unauthenticated users
 - Session identity populated with tokens and claims after successful login
@@ -61,7 +61,7 @@ After a successful login, the session identity is stored and available via `even
 
 - The middleware composes with `@escendit/sveltekit-session` to issue a secure session cookie and provide `event.locals.session`.
 - When a user hits `/.oidc/signin`, we generate a PKCE challenge, store it in the session store, and redirect to Keycloak.
-- Keycloak redirects back to `/.oidc/signin/callback` with the `code`. We validate it with `arctic`, decode tokens with `jose`, and write an `identity` payload into the session store.
+- Keycloak redirects back to `/.oidc/signin/callback` with the `code`. We validate it with `openid-client`, decode tokens with `jose`, and write an `identity` payload into the session store.
 - If `challenge.signin` is enabled and the user is unauthenticated, we redirect them to the sign-in endpoint automatically.
 
 After login, `event.locals.session.identity` contains:
@@ -152,14 +152,14 @@ Sign-out route placeholders are present in the middleware (`signout.page`, `sign
 
 ## Troubleshooting
 
-- Got `invalid_challenge` or `invalid_callback`? Ensure the callback URL configured in Keycloak matches `signin.callback` and that you pass the `challenge` query parameter back (handled automatically by the middleware).
+- Got `invalid_challenge` or `invalid_callback`? Ensure the callback URL configured in Keycloak matches `signin.callback` exactly (the challenge is correlated via the `state` parameter, which Keycloak round-trips automatically — no manual query parameter is needed).
 - `issuer mismatched` errors: Verify `KEYCLOAK_ISSUER` matches the realm’s issuer exactly.
 - Cookies not set locally: Use `http://localhost` and ensure you’re not mixing `http` and `https`. Also check the session cookie name and domain.
 
 ## Related
 
 - Session middleware: `@escendit/sveltekit-session`
-- OIDC client: `arctic`
+- OIDC client: `openid-client`
 - JWT tools: `jose`
 
 ## License
