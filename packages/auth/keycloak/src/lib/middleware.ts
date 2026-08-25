@@ -1,10 +1,38 @@
 import type {Handle, InternalMiddlewareHandle, InternalOidcConfig, Middleware, OidcConfig} from "$lib/types.js";
+import type {RequestEvent} from "@sveltejs/kit";
 import {json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
 import {Defaults} from "$lib/config.js";
 import * as client from "openid-client";
 import * as jose from "jose";
+
+// How long an in-flight sign-in/sign-out challenge is kept in the session store before
+// it's considered abandoned. Bounds the resource leak from users who start a flow but
+// never complete the round trip (closed tab, IdP unreachable, etc.).
+const CHALLENGE_TTL_SECONDS = 600;
+
+/**
+ * Only accept a `redirect_uri` that resolves to the same origin as the current request.
+ * Without this, an attacker-supplied `redirect_uri` (e.g. `?redirect_uri=https://evil.example`)
+ * would be stored and later sent back as a post-authentication/post-logout redirect target -
+ * an open redirect.
+ */
+const SanitizeRedirectUri = (event: RequestEvent, candidate: string | null): string => {
+    if (candidate !== null) {
+        try {
+            const resolved = new URL(candidate, event.url.origin);
+
+            if (resolved.origin === event.url.origin) {
+                return resolved.toString();
+            }
+        } catch {
+            // fall through to the origin below
+        }
+    }
+
+    return event.url.origin;
+}
 
 const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
 
@@ -200,11 +228,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
         return resolve(event);
     }
 
-    let parsedRedirectUri = event.url.searchParams.get('redirect_uri');
-
-    if (parsedRedirectUri === null) {
-        parsedRedirectUri = new URL(`${event.url.origin}`).toString();
-    }
+    const parsedRedirectUri = SanitizeRedirectUri(event, event.url.searchParams.get('redirect_uri'));
 
     // create the challenge
     // The redirect_uri must stay static (no query params) - openid-client derives the
@@ -227,6 +251,7 @@ const handleSignInEndpoint: Handle = async ({event, resolve}) => {
 
     // store the challenge
     await store.setSingle(`challenge:signIn:${state}`, JSON.stringify(challenge));
+    await store.expire(`challenge:signIn:${state}`, CHALLENGE_TTL_SECONDS);
 
     // build authorization url
     const configuration = await config.oidcConfiguration;
@@ -370,11 +395,7 @@ const handleSignOutEndpoint: Handle = async ({event}) => {
     // local app session must already be gone.
     await store.delete(`session:${sessionId}`);
 
-    let parsedRedirectUri = event.url.searchParams.get('redirect_uri');
-
-    if (parsedRedirectUri === null) {
-        parsedRedirectUri = new URL(`${event.url.origin}`).toString();
-    }
+    const parsedRedirectUri = SanitizeRedirectUri(event, event.url.searchParams.get('redirect_uri'));
 
     const state = client.randomState();
     const postLogoutRedirectUri = `${event.url.origin}${config.signout.callback}`;
@@ -382,6 +403,7 @@ const handleSignOutEndpoint: Handle = async ({event}) => {
     await store.setSingle(`challenge:signOut:${state}`, JSON.stringify({
         originalRedirectUri: parsedRedirectUri,
     }));
+    await store.expire(`challenge:signOut:${state}`, CHALLENGE_TTL_SECONDS);
 
     try {
         const configuration = await config.oidcConfiguration;
