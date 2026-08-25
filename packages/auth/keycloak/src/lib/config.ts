@@ -33,6 +33,7 @@ const Defaults: InternalOidcConfig = {
     },
     clientId: "invalid-client",
     clientSecret: "invalid-secret",
+    allowInsecureRequests: false,
 };
 
 export {

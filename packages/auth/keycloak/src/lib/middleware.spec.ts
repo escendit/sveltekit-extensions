@@ -735,3 +735,33 @@ describe('Back-Channel Logout', () => {
 		expect(response.status).toBe(503);
 	});
 });
+
+describe('allowInsecureRequests', () => {
+	beforeEach(() => {
+		vi.mocked(client.discovery).mockClear();
+	});
+
+	it('does not pass an execute option to discovery() by default', () => {
+		OidcMiddleware(baseConfig());
+
+		expect(client.discovery).toHaveBeenCalledWith(
+			expect.any(URL),
+			expect.any(String),
+			expect.any(String),
+			undefined,
+			undefined
+		);
+	});
+
+	it('passes execute: [allowInsecureRequests] to discovery() when explicitly enabled', () => {
+		OidcMiddleware({ ...baseConfig(), allowInsecureRequests: true });
+
+		expect(client.discovery).toHaveBeenCalledWith(
+			expect.any(URL),
+			expect.any(String),
+			expect.any(String),
+			undefined,
+			{ execute: [client.allowInsecureRequests] }
+		);
+	});
+});
