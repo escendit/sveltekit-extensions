@@ -678,4 +678,60 @@ describe('Back-Channel Logout', () => {
 		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
 		expect(response.status).toBe(400);
 	});
+
+	it('responds 503, not 400, when the JWKS/discovery infrastructure is unreachable', async () => {
+		// A completely valid, well-formed token - the failure here is purely that
+		// discovery itself never resolves, so remoteJWKSet rejects.
+		// mockRejectedValue (unlike `mockReturnValue(Promise.reject(...))`) creates the
+		// rejected promise fresh at call time, not at mock-setup time - avoiding a timing
+		// gap between the promise existing and OidcMiddleware's own .catch() attaching to
+		// it that would otherwise trip vitest's unhandled-rejection detection.
+		vi.mocked(client.discovery).mockRejectedValue(new TypeError('fetch failed'));
+
+		const config = baseConfig();
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+
+		// A 400 here would tell Keycloak this valid token was invalid, and it might give
+		// up retrying a genuine logout event over what was really our own outage.
+		expect(response.status).toBe(503);
+	});
+
+	it('responds 503, not 400, when the session store fails while clearing a matched session', async () => {
+		const config = baseConfig();
+		const sessionId = 'sess-backchannel-store-failure';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({ authenticated: true }),
+			'created',
+			Date.now().toString()
+		]);
+		await config.sessionStore.setSingle('backchannel:sid:sid-1', sessionId);
+		vi.spyOn(config.sessionStore, 'delete').mockRejectedValue(new Error('store unavailable'));
+
+		const logoutToken = await signLogoutToken({
+			sub: 'user-1',
+			sid: 'sid-1',
+			events: { [BACKCHANNEL_LOGOUT_EVENTS_CLAIM]: {} }
+		});
+
+		const handle = OidcMiddleware(config);
+		const event = makeBackchannelEvent(logoutToken);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+
+		// The token itself was valid - a store failure while acting on it is our problem,
+		// not grounds to tell Keycloak the token was bad.
+		expect(response.status).toBe(503);
+	});
 });

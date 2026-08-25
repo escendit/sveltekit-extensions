@@ -748,8 +748,19 @@ const handleBackchannelLogoutEndpoint = async (event: RequestEvent, config: Inte
         return json({error: "invalid_request", error_description: "Missing logout_token"}, {status: 400});
     }
 
+    let jwks;
+
     try {
-        const jwks = await config.remoteJWKSet;
+        jwks = await config.remoteJWKSet;
+    } catch (e) {
+        // Discovery/JWKS is unreachable - an infrastructure problem, not a judgment about
+        // this specific token. A 400 here would tell Keycloak the Logout Token was invalid
+        // and it may stop retrying a genuinely valid logout event; 503 signals "try again
+        // later" instead, matching how OPs generally treat backchannel-logout failures.
+        return new Response(null, {status: 503});
+    }
+
+    try {
         const {payload} = await jose.jwtVerify(logoutToken, jwks, {
             issuer: config.issuer,
             audience: config.clientId,
@@ -760,20 +771,26 @@ const handleBackchannelLogoutEndpoint = async (event: RequestEvent, config: Inte
 
         if (typeof payload.sid === "string") {
             const indexKey = `backchannel:sid:${payload.sid}`;
-            const sessionId = await config.sessionStore.getSingle(indexKey);
 
-            if (sessionId) {
-                await config.sessionStore.delete(`session:${sessionId}`);
-                await config.sessionStore.delete(indexKey);
+            try {
+                const sessionId = await config.sessionStore.getSingle(indexKey);
+
+                if (sessionId) {
+                    await config.sessionStore.delete(`session:${sessionId}`);
+                    await config.sessionStore.delete(indexKey);
+                }
+            } catch (e) {
+                // The token itself was already validated above - a session-store failure
+                // here is also an infrastructure problem, not a reason to tell Keycloak the
+                // token was bad.
+                return new Response(null, {status: 503});
             }
         }
 
         return new Response(null, {status: 200});
     } catch (e) {
-        // Covers both a genuinely invalid Logout Token (bad signature, wrong iss/aud,
-        // missing required claims) and infrastructure failures (JWKS temporarily
-        // unreachable) - the spec only defines 200/400 for this endpoint, so both collapse
-        // to the same 400 rather than inventing a status code Keycloak isn't expecting.
+        // A genuine Logout Token validation failure: bad signature, wrong iss/aud,
+        // expired/too old, or missing a required claim.
         return json({error: "invalid_request"}, {status: 400});
     }
 }
