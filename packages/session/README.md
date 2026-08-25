@@ -43,7 +43,7 @@ import { SessionMiddleware } from '@escendit/sveltekit-session';
 
 export const handle: Handle = sequence(
   SessionMiddleware({
-    cookie: 'session.id',
+    cookie: { name: 'session.id' },
     expireIn: 60 * 60 * 24 // 1 day (seconds)
   })
 );
@@ -110,7 +110,7 @@ export {};
 
 All options are optional; the following are the defaults applied internally:
 
-- `cookie`: `"session.id"`
+- `cookie`: `{ name: "session.id", secure: true }`
 - `expireIn`: `86400` (seconds)
 - `size`: `128` (entropy bytes for ID generation)
 - `sessionStore`: `new InMemorySessionStore()`
@@ -124,7 +124,7 @@ import { SessionMiddleware, InMemorySessionStore } from '@escendit/sveltekit-ses
 
 export const handle = sequence(
   SessionMiddleware({
-    cookie: 'sid',
+    cookie: { name: 'sid' },
     expireIn: 60 * 10, // 10 minutes
     size: 256,
     sessionStore: new InMemorySessionStore()
@@ -190,7 +190,7 @@ import { SessionMiddleware } from '@escendit/sveltekit-session';
 import { sessionStore } from '$lib/session-store';
 
 export const handle = sequence(
-  SessionMiddleware({ sessionStore, cookie: 'sid', expireIn: 60 * 60 })
+  SessionMiddleware({ sessionStore, cookie: { name: 'sid' }, expireIn: 60 * 60 })
 );
 ```
 
