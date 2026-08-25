@@ -2,7 +2,19 @@ import {type ISessionStore} from "@escendit/sveltekit-session";
 import {type ISessionHasher} from "@escendit/sveltekit-session";
 import {type ISessionGenerator} from "@escendit/sveltekit-session";
 import type {SessionConfig} from "@escendit/sveltekit-session";
-import type {Handle, RequestEvent, ResolveOptions} from "@sveltejs/kit";
+import type {RequestEvent} from "@sveltejs/kit";
+
+/**
+ * Similar to @sveltejs/kit's `Handle` type, but intentionally widens `resolve`'s options
+ * parameter to `any` instead of `ResolveOptions`. Defined locally rather than imported
+ * because its export path moved from `@sveltejs/kit` (v2) to `@sveltejs/kit/hooks` (v3)
+ * with no compatibility re-export either direction, so no single static import can satisfy
+ * both peer ranges we support.
+ */
+type Handle = (input: {
+    event: RequestEvent;
+    resolve: (event: RequestEvent, opts?: any) => MaybePromise<Response>;
+}) => MaybePromise<Response>;
 
 type Middleware = (config?: OidcConfig) => Handle;
 /**
@@ -69,7 +81,7 @@ type MaybePromise<T> = T | Promise<T>;
 type InternalMiddlewareHandle = (
     input: {
         event: RequestEvent;
-        resolve: (event: RequestEvent, opts?: ResolveOptions) => MaybePromise<Response>;
+        resolve: (event: RequestEvent, opts?: any) => MaybePromise<Response>;
     },
     options: InternalOidcConfig
 ) => MaybePromise<Response>;
@@ -77,6 +89,7 @@ type InternalMiddlewareHandle = (
 export type {
     OidcConfig,
     Middleware,
+    Handle,
     InternalMiddlewareHandle,
     InternalSessionConfig,
     InternalOidcConfig,
