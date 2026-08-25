@@ -1,5 +1,5 @@
 import {sequence} from '@sveltejs/kit/hooks';
-import {type Handle} from '@sveltejs/kit';
+import {type Handle} from '$lib/types.js';
 import {OidcMiddleware} from "$lib/middleware.js";
 import * as process from "node:process";
 
