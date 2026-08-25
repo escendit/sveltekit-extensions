@@ -12,6 +12,8 @@ Works with SvelteKit 2 and Svelte 5.
 - Configurable endpoints and pages for sign-in and sign-out
 - Optional automatic sign-in challenge for unauthenticated users
 - Session identity populated with tokens and claims after successful login
+- Transparent access-token refresh on expiry, RP-Initiated Logout on sign-out
+- Client-side OpenID Connect Session Management 1.0 (drop-in `<SessionMonitor />` component, or the lower-level `createSessionMonitor`) to react when the user's session changes at Keycloak outside this app
 
 ## Installation
 
@@ -156,6 +158,69 @@ Link users to `signout.endpoint` (default `/.oidc/signout`, optionally with a `r
 ```
 
 Visiting it clears the local session immediately, then performs RP-Initiated Logout: it redirects the user through Keycloak's `end_session_endpoint` so their SSO session ends there too, not just in this app. Keycloak redirects back to `signout.callback`, which then sends the user on to `redirect_uri` (or the app origin if none was given). If the issuer doesn't expose an `end_session_endpoint`, the local session is still cleared and the user is redirected directly, without the round trip through Keycloak.
+
+## Reacting to a session change at Keycloak (OpenID Connect Session Management 1.0)
+
+Sign-out and token refresh only react to *this app's own* requests. If the user signs out of Keycloak directly (another app in the SSO realm, a Keycloak admin action, another tab), this app has no way to know until its own session/access token happens to expire. [OpenID Connect Session Management 1.0](https://openid.net/specs/openid-connect-session-1_0.html) closes that gap: a hidden iframe polls Keycloak's `check_session_iframe` on an interval and tells you as soon as the session state changes, so you can react (typically by signing out locally) without waiting for the next page load.
+
+This only works when the app and Keycloak are same-site (e.g. `app.example.com` and `auth.example.com`, both under `example.com`) - genuinely cross-site setups are subject to third-party cookie blocking that breaks the iframe's ability to see Keycloak's session cookie.
+
+The easiest way to wire it up is dropping `<SessionMonitor />` into a root `+layout.svelte`:
+
+```svelte
+<script>
+  import { SessionMonitor } from '@escendit/sveltekit-auth-keycloak';
+</script>
+
+<SessionMonitor />
+```
+
+By default this fetches `session.endpoint` (`/.oidc/session`) on mount, does nothing if unauthenticated or the OP doesn't support Session Management, and otherwise starts polling and redirects to `/.oidc/signout` when Keycloak reports the session changed. All of that is overridable via props:
+
+```svelte
+<SessionMonitor
+  endpoint="/.oidc/session"
+  intervalMs={3000}
+  onchanged={() => {
+    // Custom reaction instead of the default sign-out redirect - e.g. a silent
+    // prompt=none re-authentication, or just prompting the user before redirecting.
+  }}
+  onerror={(data) => {
+    // Keycloak's iframe reported an error (non-retryable - polling has already stopped).
+  }}
+/>
+```
+
+### Lower-level: `createSessionMonitor`
+
+`SessionMonitor` is a thin wrapper around `createSessionMonitor`, which is framework-agnostic (no SvelteKit dependency) and available directly if you need more control than the component's props give you - a custom fetch/caching strategy for the session data, or usage outside Svelte entirely:
+
+```ts
+import { createSessionMonitor } from '@escendit/sveltekit-auth-keycloak';
+
+const session = await fetch('/.oidc/session').then((r) => r.json());
+
+if (session.authenticated && session.sessionManagementSupported) {
+  const monitor = createSessionMonitor({
+    checkSessionIframe: session.checkSessionIframe,
+    clientId: session.clientId,
+    sessionState: session.sessionState,
+    onChanged: () => {
+      window.location.href = '/.oidc/signout';
+    }
+  });
+
+  monitor.start();
+  // later: monitor.stop();
+}
+```
+
+`GET session.endpoint` (default `/.oidc/session`) returns:
+- `{ "authenticated": false }` if there's no signed-in session.
+- `{ "authenticated": true, "sessionManagementSupported": false }` if signed in but the OP didn't advertise a `check_session_iframe` in its discovery document.
+- `{ "authenticated": true, "sessionManagementSupported": true, "clientId": "...", "sessionState": "...", "checkSessionIframe": "..." }` otherwise - everything `createSessionMonitor` needs.
+
+`createSessionMonitor` takes those four values plus an `onChanged` callback, and optionally `onError` (called once, non-retryably, if Keycloak's iframe reports `"error"`) and `intervalMs` (default `3000`).
 
 ## Troubleshooting
 
