@@ -134,6 +134,18 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
     const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
     const identity = identityJson ? JSON.parse(identityJson) : null;
 
+    // Sign-out routes must stay reachable regardless of auth state - that's the whole
+    // point of sign-out. Checked before the identity gate below, which is specifically
+    // for sign-in routes (no point re-running the login flow for an authenticated user).
+    switch (event.url.pathname) {
+        case `${config.signout?.endpoint}`:
+            return handleSignOutEndpoint(request);
+        case `${config.signout?.callback}`:
+            return handleSignOutCallback(request);
+        case `${config.signout?.page}`:
+            return handleSignOutPage(request);
+    }
+
     if (identity) {
         return resolve(event);
     }
@@ -148,12 +160,6 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
             return handleSignInEndpoint(request);
         case `${config.signin?.callback}`:
             return handleSignInCallback(request);
-        case `${config.signout?.page}`:
-            return handleSignOutPage(request);
-        case `${config.signout?.endpoint}`:
-            return handleSignOutEndpoint(request);
-        case `${config.signout?.callback}`:
-            return handleSignOutCallback(request);
     }
 
     // Automatic Sign-in
@@ -351,12 +357,85 @@ const handleSignOutPage: Handle = async ({event, resolve}) => {
     return resolve(event);
 }
 
-const handleSignOutEndpoint: Handle = async ({event, resolve}) => {
-    return resolve(event);
+const handleSignOutEndpoint: Handle = async ({event}) => {
+    const {config, store, sessionId} = event.locals;
+
+    // Read the identity before clearing it so we can pass id_token_hint - this lets
+    // Keycloak end the correct SSO session without prompting the user to pick one.
+    const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
+    const identity = identityJson ? JSON.parse(identityJson) : null;
+
+    // Clear the local session immediately. The RP-initiated logout redirect below is
+    // best-effort - even if it never completes (user closes the tab, IdP is down), the
+    // local app session must already be gone.
+    await store.delete(`session:${sessionId}`);
+
+    let parsedRedirectUri = event.url.searchParams.get('redirect_uri');
+
+    if (parsedRedirectUri === null) {
+        parsedRedirectUri = new URL(`${event.url.origin}`).toString();
+    }
+
+    const state = client.randomState();
+    const postLogoutRedirectUri = `${event.url.origin}${config.signout.callback}`;
+
+    await store.setSingle(`challenge:signOut:${state}`, JSON.stringify({
+        originalRedirectUri: parsedRedirectUri,
+    }));
+
+    try {
+        const configuration = await config.oidcConfiguration;
+        const endSessionParams: Record<string, string> = {
+            post_logout_redirect_uri: postLogoutRedirectUri,
+            state,
+        };
+
+        if (identity?.idTokenRaw) {
+            endSessionParams.id_token_hint = identity.idTokenRaw;
+        }
+
+        const endSessionUri = client.buildEndSessionUrl(configuration, endSessionParams);
+
+        return new Response(null, {
+            status: 307,
+            headers: {
+                Location: endSessionUri.toString(),
+            },
+        });
+    } catch (e) {
+        // RP-initiated logout isn't available (e.g. no end_session_endpoint discovered).
+        // The local session is already cleared above, so just send the user on their way.
+        await store.delete(`challenge:signOut:${state}`);
+
+        return new Response(null, {
+            status: 307,
+            headers: {
+                Location: parsedRedirectUri,
+            },
+        });
+    }
 }
 
-const handleSignOutCallback: Handle = async ({event, resolve}) => {
-    return resolve(event);
+const handleSignOutCallback: Handle = async ({event}) => {
+    const {store} = event.locals;
+    const state = event.url.searchParams.get('state');
+
+    const challengeJson = state !== null ? await store.getSingle(`challenge:signOut:${state}`) : null;
+
+    let redirectTo = event.url.origin;
+
+    if (challengeJson !== null) {
+        const challenge = JSON.parse(challengeJson);
+        redirectTo = challenge.originalRedirectUri;
+        await store.delete(`challenge:signOut:${state}`);
+    }
+
+    return new Response(null, {
+        status: 307,
+        headers: {
+            Location: redirectTo,
+        },
+    });
 }
 
 const ValidateOidcConfiguration = (configuration: InternalOidcConfig): Array<string> => {

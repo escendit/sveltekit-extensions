@@ -146,9 +146,15 @@ KEYCLOAK_CLIENT_SECRET=super-secret
 KEYCLOAK_EXPIRE_IN=86400
 ```
 
-## Notes on sign-out
+## Signing out
 
-Sign-out route placeholders are present in the middleware (`signout.page`, `signout.endpoint`, `signout.callback`). The exact logout behavior can vary per Keycloak setup (front-channel/back-channel). You can implement a simple sign-out by clearing the session identity and redirecting to your homepage, or integrate with Keycloak’s end-session endpoint if required.
+Link users to `signout.endpoint` (default `/.oidc/signout`, optionally with a `redirect_uri` query param, same as sign-in) to sign out:
+
+```svelte
+<a href="/.oidc/signout?redirect_uri=/">Sign out</a>
+```
+
+Visiting it clears the local session immediately, then performs RP-Initiated Logout: it redirects the user through Keycloak's `end_session_endpoint` so their SSO session ends there too, not just in this app. Keycloak redirects back to `signout.callback`, which then sends the user on to `redirect_uri` (or the app origin if none was given). If the issuer doesn't expose an `end_session_endpoint`, the local session is still cleared and the user is redirected directly, without the round trip through Keycloak.
 
 ## Troubleshooting
 
