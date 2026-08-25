@@ -5,10 +5,11 @@ import type {SessionConfig} from "@escendit/sveltekit-session";
 import type {RequestEvent} from "@sveltejs/kit";
 
 /**
- * Structurally equivalent to @sveltejs/kit's `Handle` type. Defined locally rather than
- * imported because its export path moved from `@sveltejs/kit` (v2) to `@sveltejs/kit/hooks`
- * (v3) with no compatibility re-export either direction, so no single static import can
- * satisfy both peer ranges we support.
+ * Similar to @sveltejs/kit's `Handle` type, but intentionally widens `resolve`'s options
+ * parameter to `any` instead of `ResolveOptions`. Defined locally rather than imported
+ * because its export path moved from `@sveltejs/kit` (v2) to `@sveltejs/kit/hooks` (v3)
+ * with no compatibility re-export either direction, so no single static import can satisfy
+ * both peer ranges we support.
  */
 type Handle = (input: {
     event: RequestEvent;
