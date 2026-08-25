@@ -1,5 +1,5 @@
-import { redirect, type Handle } from '@sveltejs/kit';
-import type { InternalMiddlewareHandle, InternalSessionConfig, SessionConfig } from '$lib/types.js';
+import { redirect } from '@sveltejs/kit';
+import type { Handle, InternalMiddlewareHandle, InternalSessionConfig, SessionConfig } from '$lib/types.js';
 import { Defaults } from '$lib/config.js';
 import type { ISessionStore } from '$lib/ISessionStore.js';
 import type { ISessionHasher } from '$lib/ISessionHasher.js';
