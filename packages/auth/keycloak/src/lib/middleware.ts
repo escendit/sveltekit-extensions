@@ -586,8 +586,16 @@ const handleSessionEndpoint: Handle = async ({event}) => {
     const [identityJson] = await store.getMultiple(`session:${sessionId}`, ["identity"]);
     const identity = identityJson ? JSON.parse(identityJson) : null;
 
-    if (!identity?.sessionState) {
+    if (!identity) {
         return json({authenticated: false});
+    }
+
+    if (!identity.sessionState) {
+        // Authenticated, but there's no session_state to poll with - either the OP didn't
+        // return one at sign-in, or this identity predates Session Management support
+        // being added. Distinct from the unauthenticated case above: misreporting a
+        // signed-in user as signed out here would be wrong, not just unsupported.
+        return json({authenticated: true, sessionManagementSupported: false});
     }
 
     const configuration = await config.oidcConfiguration;

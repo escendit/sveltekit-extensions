@@ -412,6 +412,24 @@ describe('session endpoint (OpenID Connect Session Management 1.0)', () => {
 		expect(resolve).not.toHaveBeenCalled();
 	});
 
+	it('reports authenticated without session-management support for a signed-in identity with no sessionState, rather than misreporting it as unauthenticated', async () => {
+		const config = baseConfig();
+		const sessionId = 'sess-session-endpoint-no-state';
+		await config.sessionStore.setMultiple(`session:${sessionId}`, [
+			'identity',
+			JSON.stringify({authenticated: true}),
+			'created',
+			Date.now().toString()
+		]);
+
+		const handle = OidcMiddleware(config);
+		const event = makeEvent('/.oidc/session', sessionId);
+		const resolve = vi.fn(async () => new Response('resolved'));
+
+		const response = (await invokeHandle(handle, event as never, resolve)) as Response;
+		expect(await response.json()).toEqual({authenticated: true, sessionManagementSupported: false});
+	});
+
 	it('reports authenticated without session-management support when the OP does not advertise check_session_iframe', async () => {
 		vi.mocked(client.discovery).mockResolvedValueOnce({
 			serverMetadata: () => ({})
