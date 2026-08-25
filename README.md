@@ -31,7 +31,7 @@ Then follow the corresponding package README for setup and APIs.
 
 ## Releasing
 
-Pushing a GitHub Release triggers the `Release` workflow (build), which on success fans out to `npm` and `GitHub` workflows that version and publish every non-private package via `lerna publish from-package`.
+Publishing a GitHub Release triggers the `Release` workflow (build), which on success fans out to `npm` and `GitHub` workflows that version and publish every non-private package via `lerna publish from-package`.
 
 - **npm** (`registry.npmjs.org`): authenticated via [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) - the workflow requests a short-lived GitHub Actions identity token instead of using a stored `NPM_TOKEN` secret. Lerna (v9+) has this built in; no extra config is needed in the workflow beyond the `id-token: write` permission. Each published package must be configured with this repo's `npm-registry.yml` workflow as its Trusted Publisher in that package's Settings on npmjs.com before its first OIDC-authenticated release.
 - **GitHub Packages** (`npm.pkg.github.com`): authenticated via the workflow's own `GITHUB_TOKEN`, scoped to this repository.
