@@ -2,12 +2,12 @@ import type { ISessionStore } from '$lib/ISessionStore.js';
 import type { RedisClient } from "bun";
 
 /**
- * Redis session store. The `bun` runtime module is loaded lazily (on first use) rather
- * than via a static top-level import, so that merely importing this package's entry point
- * doesn't require the Bun runtime - only actually constructing a RedisSessionStore does. A
- * static `import ... from "bun"` here made the whole package unloadable outside Bun's own
- * module resolver (e.g. plain Node, or Vite's SSR module graph under vitest), even for
- * consumers who only ever wanted InMemorySessionStore.
+ * Redis session store. The `bun` runtime module is loaded lazily, on the first actual
+ * Redis operation, rather than via a static top-level import - constructing a
+ * RedisSessionStore doesn't touch it either. A static `import ... from "bun"` here made
+ * the whole package unloadable outside Bun's own module resolver (e.g. plain Node, or
+ * Vite's SSR module graph under vitest), even for consumers who only ever wanted
+ * InMemorySessionStore.
  */
 export class RedisSessionStore implements ISessionStore {
     private clientPromise: Promise<RedisClient> | undefined;
