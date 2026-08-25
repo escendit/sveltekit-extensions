@@ -4,17 +4,19 @@ import {OidcMiddleware} from "$lib/middleware.js";
 import {
     createSessionMonitor,
     parseSessionCheckMessage,
-    type SessionMonitor,
+    type SessionMonitorHandle,
     type SessionMonitorOptions,
     type SessionCheckStatus,
 } from "$lib/checkSession.js";
+import SessionMonitor from "$lib/SessionMonitor.svelte";
 
 export {
     type OidcConfig,
     OidcMiddleware,
     createSessionMonitor,
     parseSessionCheckMessage,
-    type SessionMonitor,
+    type SessionMonitorHandle,
     type SessionMonitorOptions,
     type SessionCheckStatus,
+    SessionMonitor,
 };

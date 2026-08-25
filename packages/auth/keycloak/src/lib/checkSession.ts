@@ -58,7 +58,7 @@ type SessionMonitorOptions = {
     onError?: (data: unknown) => void;
 };
 
-type SessionMonitor = {
+type SessionMonitorHandle = {
     /** Starts the hidden iframe and polling loop. Safe to call once; a no-op if already started. */
     start(): void;
     /** Stops polling and removes the iframe. Safe to call even if never started. */
@@ -70,7 +70,7 @@ type SessionMonitor = {
  * Management 1.0. Framework-agnostic - has no dependency on SvelteKit or this package's
  * server-side middleware beyond the shape of data `/.oidc/session` returns.
  */
-const createSessionMonitor = (options: SessionMonitorOptions): SessionMonitor => {
+const createSessionMonitor = (options: SessionMonitorOptions): SessionMonitorHandle => {
     const opOrigin = new URL(options.checkSessionIframe).origin;
     const intervalMs = options.intervalMs ?? 3000;
     const message = `${options.clientId} ${options.sessionState}`;
@@ -144,6 +144,6 @@ export {
     createSessionMonitor,
     parseSessionCheckMessage,
     type SessionMonitorOptions,
-    type SessionMonitor,
+    type SessionMonitorHandle,
     type SessionCheckStatus,
 };
