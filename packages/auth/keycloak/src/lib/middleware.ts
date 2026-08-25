@@ -1,5 +1,6 @@
 import type {Handle, InternalMiddlewareHandle, InternalOidcConfig, Middleware, OidcConfig} from "$lib/types.js";
 import type {RequestEvent} from "@sveltejs/kit";
+import type {ISessionStore} from "@escendit/sveltekit-session";
 import {json} from "@sveltejs/kit";
 import {sequence} from "@sveltejs/kit/hooks";
 import {SessionMiddleware} from "@escendit/sveltekit-session";
@@ -32,6 +33,79 @@ const SanitizeRedirectUri = (event: RequestEvent, candidate: string | null): str
     }
 
     return event.url.origin;
+}
+
+/**
+ * True if the stored identity's access token has expired. `accessTokenExpiresAt` comes
+ * back from JSON.parse as a plain string, not a revived Date, hence the re-parse. A
+ * missing expiry (the authorization server didn't return `expires_in`) is treated as
+ * "unknown, assume still valid" rather than forcing a refresh on every request.
+ */
+const IsAccessTokenExpired = (identity: any): boolean => {
+    if (!identity.accessTokenExpiresAt) {
+        return false;
+    }
+
+    return new Date(identity.accessTokenExpiresAt).getTime() <= Date.now();
+}
+
+/**
+ * Refresh an expired access token using the stored refresh token, replacing the session's
+ * identity with the new tokens. Returns false (and clears the session) when there's no
+ * refresh token to use or the authorization server rejects it (e.g. expired/revoked) -
+ * callers should treat that as "no longer authenticated".
+ */
+const RefreshIdentity = async (
+    config: InternalOidcConfig,
+    store: ISessionStore,
+    sessionId: string,
+    identity: any
+): Promise<boolean> => {
+    if (!identity.refreshTokenRaw) {
+        await store.delete(`session:${sessionId}`);
+        return false;
+    }
+
+    try {
+        const configuration = await config.oidcConfiguration;
+        const data = await client.refreshTokenGrant(configuration, identity.refreshTokenRaw);
+
+        const accessToken = jose.decodeJwt(data.access_token);
+        const refreshToken = data.refresh_token ? jose.decodeJwt(data.refresh_token) : identity.refreshToken ?? null;
+        const idToken = data.id_token ? jose.decodeJwt(data.id_token) : identity.idToken ?? null;
+        const expiresInSeconds = data.expiresIn();
+
+        const sessionData = {
+            authenticated: true,
+            validationErrors: identity.validationErrors ?? [],
+            accessTokenRaw: data.access_token,
+            accessTokenExpiresAt: expiresInSeconds !== undefined ? new Date(Date.now() + expiresInSeconds * 1000) : null,
+            accessTokenExpiresInSeconds: expiresInSeconds ?? null,
+            // Keycloak may not rotate the refresh token on every refresh - keep the
+            // existing one when the server doesn't send a new one.
+            refreshTokenRaw: data.refresh_token ?? identity.refreshTokenRaw,
+            idTokenRaw: data.id_token ?? identity.idTokenRaw ?? null,
+            tokenType: data.token_type,
+            scopes: data.scope?.split(' ') ?? identity.scopes ?? [],
+            sessionState: identity.sessionState,
+            accessToken,
+            refreshToken,
+            idToken,
+        };
+
+        await store.setMultiple(`session:${sessionId}`, [
+            "identity",
+            JSON.stringify(sessionData),
+        ]);
+
+        return true;
+    } catch (e) {
+        if (e instanceof client.ResponseBodyError) {
+        }
+
+        await store.delete(`session:${sessionId}`);
+        return false;
+    }
 }
 
 const OidcMiddleware: Middleware = (config?: OidcConfig): Handle => {
@@ -175,6 +249,16 @@ const handleOidcMiddlewareInternal: InternalMiddlewareHandle = async (request, c
     }
 
     if (identity) {
+        if (IsAccessTokenExpired(identity)) {
+            const refreshed = await RefreshIdentity(config, store, sessionId, identity);
+
+            if (!refreshed) {
+                // Refresh failed (or wasn't possible) and the session was cleared - fall
+                // through to the normal unauthenticated handling below.
+                return handleOidcMiddlewareInternal(request, config);
+            }
+        }
+
         return resolve(event);
     }
 

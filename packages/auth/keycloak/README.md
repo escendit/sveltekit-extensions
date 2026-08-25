@@ -63,6 +63,7 @@ After a successful login, the session identity is stored and available via `even
 - When a user hits `/.oidc/signin`, we generate a PKCE challenge, store it in the session store, and redirect to Keycloak.
 - Keycloak redirects back to `/.oidc/signin/callback` with the `code`. We validate it with `openid-client`, decode tokens with `jose`, and write an `identity` payload into the session store.
 - If `challenge.signin` is enabled and the user is unauthenticated, we redirect them to the sign-in endpoint automatically.
+- On each request from an already-authenticated user, if the stored access token has expired, we transparently refresh it with Keycloak using the stored refresh token before continuing - no redirect, the request just proceeds with fresh tokens. If the refresh token is missing, expired, or revoked, the session is cleared and the request falls through to the normal unauthenticated handling (including `challenge.signin`, if enabled).
 
 After login, `event.locals.session.identity` contains:
 - `authenticated: boolean`
