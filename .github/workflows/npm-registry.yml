@@ -8,6 +8,7 @@ on:
       - completed
 permissions:
   contents: read
+  id-token: write
 jobs:
   pack:
     if: ${{ github.event.workflow_run.event == 'release' && github.event.workflow_run.conclusion == 'success' }}
@@ -35,12 +36,12 @@ jobs:
         run: echo "VERSION=${TAG#v}" >> $GITHUB_ENV
       - name: Set Version
         run: bunx lerna version $VERSION --no-private --no-git-tag-version --yes
-      # Set Authentication
-      - name: Create .npmrc
-        run: |
-          {
-            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
-          } | tee -a .npmrc
+      # Authentication is via npm Trusted Publishing (OIDC) - the id-token: write
+      # permission above lets Lerna (v9+, has built-in OIDC support) exchange a
+      # GitHub Actions identity token for a short-lived publish credential, so no
+      # NPM_TOKEN secret or .npmrc auth line is needed. Each published package must
+      # have this workflow configured as its Trusted Publisher on npmjs.com first
+      # (package Settings -> Trusted Publisher -> GitHub Actions).
       # Publish
       - name: Setup Git
         run: |
